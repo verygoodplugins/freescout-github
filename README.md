@@ -1,0 +1,2 @@
+# freescout-github
+
