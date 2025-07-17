@@ -1,0 +1,25 @@
+{
+    "name": "freescout/github-module",
+    "description": "GitHub Integration for FreeScout",
+    "type": "freescout-module",
+    "keywords": ["github", "integration", "issues", "ai"],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "FreeScout Team",
+            "email": "support@freescout.net"
+        }
+    ],
+    "autoload": {
+        "psr-4": {
+            "Modules\\Github\\": ""
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Modules\\Github\\Providers\\GithubServiceProvider"
+            ]
+        }
+    }
+}

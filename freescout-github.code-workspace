@@ -4,7 +4,7 @@
 			"path": "."
 		},
 		{
-			"path": "../freescout"
+			"path": "../../../Local Sites/freescout/app/public"
 		}
 	],
 	"settings": {}
