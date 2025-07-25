@@ -34,7 +34,7 @@ class GithubIssue extends Model
      */
     public function conversations(): BelongsToMany
     {
-        return $this->belongsToMany(Conversation::class, 'github_issue_conversation');
+        return $this->belongsToMany(Conversation::class, 'github_issue_conversation', 'github_issue_id', 'conversation_id');
     }
 
     /**
@@ -42,9 +42,10 @@ class GithubIssue extends Model
      */
     public static function conversationLinkedIssues($conversation_id)
     {
-        return self::whereHas('conversations', function ($query) use ($conversation_id) {
-            $query->where('conversations.id', $conversation_id);
-        })->get();
+        return self::join('github_issue_conversation', 'github_issues.id', '=', 'github_issue_conversation.github_issue_id')
+                   ->where('github_issue_conversation.conversation_id', $conversation_id)
+                   ->select('github_issues.*')
+                   ->get();
     }
 
     /**

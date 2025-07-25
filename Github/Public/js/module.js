@@ -1,547 +1,836 @@
 /**
  * GitHub Module JavaScript
+ * Following FreeScout Jira module pattern
  */
 
-(function($) {
-    'use strict';
+var GitHub = {
+    config: {
+        debounceDelay: 300,
+        searchMinLength: 2,
+        maxSearchResults: 10
+    },
+    cache: {
+        repositories: null
+    },
+    warningsShown: [] // Track warnings to prevent duplicates
+};
 
-    // GitHub Module object
-    window.GitHub = {
-        // Configuration
-        config: {
-            debounceDelay: 300,
-            searchMinLength: 2,
-            maxSearchResults: 10
-        },
-
-        // Initialize the module
-        init: function() {
-            this.bindEvents();
-            this.initializeComponents();
-        },
-
-        // Bind event handlers
-        bindEvents: function() {
-            // Settings page events
-            $(document).on('click', '#test-connection', this.testConnection);
-            $(document).on('click', '#refresh-repositories', this.refreshRepositories);
-            $(document).on('change', '#github_default_repository', this.onRepositoryChange);
-            $(document).on('click', '#add-label-mapping', this.addLabelMapping);
-            $(document).on('click', '.remove-mapping', this.removeLabelMapping);
-
-            // Sidebar events
-            $(document).on('click', '.github-issue-action', this.handleIssueAction);
-            $(document).on('click', '.github-search-result-item', this.selectSearchResult);
-
-            // Modal events
-            $(document).on('show.bs.modal', '#github-create-issue-modal', this.onCreateModalShow);
-            $(document).on('show.bs.modal', '#github-link-issue-modal', this.onLinkModalShow);
-            $(document).on('change', '#github-repository', this.onCreateRepositoryChange);
-            $(document).on('change', '#github-auto-generate', this.onAutoGenerateChange);
-            $(document).on('input', '#github-issue-search', this.debounce(this.searchIssues, this.config.debounceDelay));
-            $(document).on('click', '#github-create-issue-btn', this.createIssue);
-            $(document).on('click', '#github-link-issue-btn', this.linkIssue);
-        },
-
-        // Initialize components
-        initializeComponents: function() {
-            // Initialize any components that need setup
-            this.initializeTags();
-            this.initializeTooltips();
-        },
-
-        // Initialize tags/labels
-        initializeTags: function() {
-            // Initialize select2 for labels if available
-            if (typeof $.fn.select2 !== 'undefined') {
-                $('#github-issue-labels').select2({
-                    placeholder: 'Select labels',
-                    allowClear: true,
-                    width: '100%'
-                });
-            }
-        },
-
-        // Initialize tooltips
-        initializeTooltips: function() {
-            $('[data-toggle="tooltip"]').tooltip();
-        },
-
-        // Test GitHub connection
-        testConnection: function(e) {
+function githubInitSettings() {
+    $(document).ready(function() {
+        // Test connection button
+        $("#test-connection").click(function(e) {
             e.preventDefault();
-            var $btn = $(this);
+            var button = $(this);
             var token = $('#github_token').val();
 
             if (!token) {
-                GitHub.showAlert('error', 'Please enter a GitHub token first');
+                showFloatingAlert('error', 'Please enter a GitHub token first');
                 return;
             }
 
-            GitHub.setButtonLoading($btn, true);
+            button.button('loading');
 
-            $.ajax({
-                url: $btn.data('url') || '/github/test-connection',
-                type: 'POST',
-                data: {
-                    _token: $('meta[name="csrf-token"]').attr('content'),
-                    token: token
-                },
-                success: function(response) {
-                    GitHub.showConnectionResult(response);
-                    if (response.status === 'success') {
-                        GitHub.loadRepositories();
+            fsAjax({
+                token: token
+            }, 
+            laroute.route('github.test_connection'), 
+            function(response) {
+                button.button('reset');
+                if (isAjaxSuccess(response)) {
+                    githubShowConnectionResult(response);
+                    if (response.repositories) {
+                        githubPopulateRepositories(response.repositories);
                     }
-                },
-                error: function(xhr) {
-                    var response = xhr.responseJSON || {status: 'error', message: 'Connection failed'};
-                    GitHub.showConnectionResult(response);
-                },
-                complete: function() {
-                    GitHub.setButtonLoading($btn, false);
+                } else {
+                    githubShowConnectionResult(response);
                 }
+            }, true, function(response) {
+                button.button('reset');
+                showFloatingAlert('error', Lang.get("messages.ajax_error"));
             });
-        },
+        });
 
-        // Refresh repositories
-        refreshRepositories: function(e) {
+        // Refresh repositories button
+        $("#refresh-repositories").click(function(e) {
             e.preventDefault();
-            GitHub.loadRepositories();
-        },
+            githubLoadRepositories();
+        });
 
-        // Load repositories
-        loadRepositories: function() {
-            $.ajax({
-                url: '/github/repositories',
-                type: 'GET',
-                success: function(response) {
-                    if (response.status === 'success') {
-                        GitHub.populateRepositorySelects(response.data);
-                    }
-                },
-                error: function(xhr) {
-                    console.error('Failed to load repositories:', xhr);
-                }
-            });
-        },
-
-        // Populate repository selects
-        populateRepositorySelects: function(repositories) {
-            var selects = ['#github_default_repository', '#github-repository', '#github-link-repository'];
-            
-            $.each(selects, function(i, selectId) {
-                var $select = $(selectId);
-                if ($select.length === 0) return;
-                
-                var currentValue = $select.val();
-                $select.empty().append('<option value="">Select Repository</option>');
-                
-                $.each(repositories, function(i, repo) {
-                    if (repo.has_issues) {
-                        var selected = repo.full_name === currentValue ? 'selected' : '';
-                        $select.append('<option value="' + repo.full_name + '" ' + selected + '>' + repo.full_name + '</option>');
-                    }
-                });
-            });
-        },
-
-        // Handle repository change in settings
-        onRepositoryChange: function() {
+        // Repository change handler
+        $("#github_default_repository").change(function() {
             var repository = $(this).val();
             if (repository) {
-                GitHub.loadLabelMappings(repository);
+                githubLoadLabelMappings(repository);
                 $('#label-mapping-section').show();
             } else {
                 $('#label-mapping-section').hide();
             }
-        },
-
-        // Load label mappings
-        loadLabelMappings: function(repository) {
-            $.ajax({
-                url: '/github/label-mappings',
-                type: 'GET',
-                data: { repository: repository },
-                success: function(response) {
-                    if (response.status === 'success') {
-                        GitHub.renderLabelMappings(response.data);
-                    }
-                }
-            });
-        },
-
-        // Render label mappings
-        renderLabelMappings: function(mappings) {
-            var $container = $('#label-mappings-container');
-            $container.empty();
-
-            if (mappings.length === 0) {
-                $container.html('<p class="text-muted">No label mappings configured</p>');
-                return;
-            }
-
-            $.each(mappings, function(i, mapping) {
-                GitHub.addLabelMappingRow(mapping);
-            });
-        },
-
-        // Add label mapping row
-        addLabelMappingRow: function(mapping) {
-            mapping = mapping || {};
-            
-            var html = '<div class="label-mapping-row">' +
-                '<input type="text" class="form-control" name="freescout_tag" placeholder="FreeScout Tag" value="' + (mapping.freescout_tag || '') + '">' +
-                '<span>→</span>' +
-                '<input type="text" class="form-control" name="github_label" placeholder="GitHub Label" value="' + (mapping.github_label || '') + '">' +
-                '<input type="number" class="form-control" name="confidence_threshold" placeholder="0.80" value="' + (mapping.confidence_threshold || 0.80) + '" min="0" max="1" step="0.01">' +
-                '<button type="button" class="btn btn-danger btn-sm remove-mapping">' +
-                    '<i class="fa fa-trash"></i>' +
-                '</button>' +
-            '</div>';
-
-            $('#label-mappings-container').append(html);
-        },
+        });
 
         // Add label mapping
-        addLabelMapping: function(e) {
+        $("#add-label-mapping").click(function(e) {
             e.preventDefault();
-            GitHub.addLabelMappingRow();
-        },
+            githubAddLabelMappingRow();
+        });
 
         // Remove label mapping
-        removeLabelMapping: function(e) {
+        $(document).on('click', '.remove-mapping', function(e) {
             e.preventDefault();
             $(this).closest('.label-mapping-row').remove();
-        },
+        });
+    });
+}
 
-        // Handle issue actions
-        handleIssueAction: function(e) {
+function githubInitConversation() {
+    $(document).ready(function() {
+        // Issue actions
+        $(document).on('click', '.github-issue-action', function(e) {
             e.preventDefault();
-            var $link = $(this);
-            var action = $link.data('action');
-            var issueId = $link.data('issue-id');
+            var link = $(this);
+            var action = link.data('action');
+            var issueId = link.data('issue-id');
             
-            switch (action) {
-                case 'unlink':
-                    if (confirm('Are you sure you want to unlink this issue?')) {
-                        GitHub.unlinkIssue(issueId);
-                    }
-                    break;
-                case 'refresh':
-                    GitHub.refreshIssue(issueId);
-                    break;
+            if (action === 'unlink') {
+                if (confirm('Are you sure you want to unlink this issue?')) {
+                    githubUnlinkIssue(issueId);
+                }
+            } else if (action === 'refresh') {
+                githubRefreshIssue(issueId);
             }
-        },
+        });
+    });
+}
 
-        // Unlink issue
-        unlinkIssue: function(issueId) {
-            $.ajax({
-                url: '/github/unlink-issue',
-                type: 'POST',
-                data: {
-                    _token: $('meta[name="csrf-token"]').attr('content'),
-                    conversation_id: GitHub.getConversationId(),
-                    issue_id: issueId
-                },
-                success: function(response) {
-                    if (response.status === 'success') {
-                        GitHub.showAlert('success', response.message);
-                        GitHub.refreshSidebar();
-                    } else {
-                        GitHub.showAlert('error', response.message);
-                    }
-                },
-                error: function(xhr) {
-                    var response = xhr.responseJSON || {message: 'An error occurred'};
-                    GitHub.showAlert('error', response.message);
+function githubInitModals() {
+    $(document).ready(function() {
+        // Create issue modal
+        $('#github-create-issue-modal').on('show.bs.modal', function() {
+            // Use cached repositories if available to avoid unnecessary API calls
+            if (GitHub.cache.repositories && GitHub.cache.repositories.length > 0) {
+                githubPopulateRepositories(GitHub.cache.repositories);
+            } else {
+                // Try localStorage cache
+                var cachedRepos = githubGetCachedRepositories();
+                if (cachedRepos) {
+                    githubPopulateRepositories(cachedRepos);
+                } else {
+                    githubLoadRepositories();
                 }
-            });
-        },
-
-        // Refresh issue
-        refreshIssue: function(issueId) {
-            var $icon = $('[data-issue-id="' + issueId + '"]').find('.fa-refresh');
-            $icon.addClass('fa-spin');
-            
-            $.ajax({
-                url: '/github/issue-details/' + issueId,
-                type: 'GET',
-                success: function(response) {
-                    if (response.status === 'success') {
-                        GitHub.refreshSidebar();
-                    }
-                },
-                complete: function() {
-                    $icon.removeClass('fa-spin');
-                }
-            });
-        },
-
-        // Modal show handlers
-        onCreateModalShow: function() {
-            GitHub.loadRepositories();
+            }
             $('#github-create-issue-form')[0].reset();
-            if ($('#github-auto-generate').is(':checked')) {
-                GitHub.generateIssueContent();
-            }
-        },
+            // Restore default repository after form reset
+            setTimeout(function() {
+                githubSetDefaultRepository('#github-repository');
+                
+                // Auto-generate content if AI is enabled and auto-generate is checked
+                if ($('#github-auto-generate').is(':checked')) {
+                    githubGenerateIssueContent();
+                }
+            }, 100);
+        });
 
-        onLinkModalShow: function() {
-            GitHub.loadRepositories();
+        // Link issue modal
+        $('#github-link-issue-modal').on('show.bs.modal', function() {
+            
+            // Use cached repositories if available to avoid unnecessary API calls
+            if (GitHub.cache.repositories && GitHub.cache.repositories.length > 0) {
+                githubPopulateRepositories(GitHub.cache.repositories);
+            } else {
+                // Try localStorage cache
+                var cachedRepos = githubGetCachedRepositories();
+                if (cachedRepos) {
+                    githubPopulateRepositories(cachedRepos);
+                } else {
+                    githubLoadRepositories();
+                }
+            }
             $('#github-link-issue-form')[0].reset();
             $('#github-search-results').hide();
-        },
+            // Restore default repository after form reset
+            setTimeout(function() {
+                githubSetDefaultRepository('#github-link-repository');
+            }, 10);
+        });
 
-        // Create repository change
-        onCreateRepositoryChange: function() {
+        // Repository change in create modal
+        $(document).on('change', '#github-repository', function() {
             var repository = $(this).val();
             if (repository) {
-                GitHub.loadRepositoryLabels(repository);
+                githubLoadRepositoryLabels(repository);
             }
-        },
+        });
 
-        // Auto-generate change
-        onAutoGenerateChange: function() {
+        // Auto-generate toggle
+        $(document).on('change', '#github-auto-generate', function() {
             if ($(this).is(':checked')) {
-                GitHub.generateIssueContent();
+                githubGenerateIssueContent();
             }
-        },
+        });
+        
+        // Manual generate content button
+        $(document).on('click', '#github-generate-content-btn', function(e) {
+            e.preventDefault();
+            githubGenerateIssueContent();
+        });
 
-        // Load repository labels
-        loadRepositoryLabels: function(repository) {
-            $.ajax({
-                url: '/github/labels/' + encodeURIComponent(repository),
-                type: 'GET',
-                success: function(response) {
-                    if (response.status === 'success') {
-                        GitHub.populateLabelsSelect(response.data);
-                    }
-                }
-            });
-        },
-
-        // Populate labels select
-        populateLabelsSelect: function(labels) {
-            var $select = $('#github-issue-labels');
-            $select.empty();
-            
-            $.each(labels, function(i, label) {
-                $select.append('<option value="' + label.name + '">' + label.name + '</option>');
-            });
-
-            // Refresh select2 if available
-            if ($select.hasClass('select2-hidden-accessible')) {
-                $select.trigger('change');
-            }
-        },
-
-        // Search issues
-        searchIssues: function() {
+        // Issue search
+        var searchTimeout;
+        $(document).on('input', '#github-issue-search', function() {
+            clearTimeout(searchTimeout);
+            var query = $(this).val();
             var repository = $('#github-link-repository').val();
-            var query = $('#github-issue-search').val();
             
-            if (repository && query.length >= GitHub.config.searchMinLength) {
-                GitHub.performIssueSearch(repository, query);
-            } else {
-                $('#github-search-results').hide();
-            }
-        },
-
-        // Perform issue search
-        performIssueSearch: function(repository, query) {
-            $.ajax({
-                url: '/github/search-issues',
-                type: 'POST',
-                data: {
-                    _token: $('meta[name="csrf-token"]').attr('content'),
-                    repository: repository,
-                    query: query,
-                    per_page: GitHub.config.maxSearchResults
-                },
-                success: function(response) {
-                    if (response.status === 'success') {
-                        GitHub.displaySearchResults(response.data);
-                    }
+            searchTimeout = setTimeout(function() {
+                if (repository && query.length >= GitHub.config.searchMinLength) {
+                    githubSearchIssues(repository, query);
+                } else {
+                    $('#github-search-results').hide();
                 }
-            });
-        },
-
-        // Display search results
-        displaySearchResults: function(issues) {
-            var $container = $('#github-search-results-list');
-            $container.empty();
-            
-            if (issues.length === 0) {
-                $container.html('<p class="text-muted">No issues found</p>');
-            } else {
-                $.each(issues, function(i, issue) {
-                    var badgeClass = issue.state === 'open' ? 'success' : 'secondary';
-                    var html = '<div class="github-search-result-item" data-issue-number="' + issue.number + '">' +
-                        '<div class="github-search-result-number">#' + issue.number + '</div>' +
-                        '<div class="github-search-result-title">' + issue.title + '</div>' +
-                        '<div class="github-search-result-meta">' +
-                            '<span class="badge badge-' + badgeClass + '">' + issue.state + '</span>' +
-                            ' • Updated ' + GitHub.formatDate(issue.updated_at) +
-                        '</div>' +
-                    '</div>';
-                    $container.append(html);
-                });
-            }
-            
-            $('#github-search-results').show();
-        },
+            }, GitHub.config.debounceDelay);
+        });
 
         // Select search result
-        selectSearchResult: function() {
+        $(document).on('click', '.github-search-result-item', function() {
             var issueNumber = $(this).data('issue-number');
             $('#github-issue-number').val(issueNumber);
             $('#github-search-results').hide();
-        },
+        });
 
-        // Generate issue content
-        generateIssueContent: function() {
-            // Basic content generation - can be enhanced with AI
-            var subject = GitHub.getConversationSubject();
-            if (subject && !$('#github-issue-title').val()) {
-                $('#github-issue-title').val(subject);
-            }
-        },
-
-        // Create issue
-        createIssue: function(e) {
+        // Create issue button
+        $(document).on('click', '#github-create-issue-btn', function(e) {
             e.preventDefault();
-            var $btn = $(this);
-            var formData = $('#github-create-issue-form').serialize();
-            
-            GitHub.setButtonLoading($btn, true);
-            
-            $.ajax({
-                url: '/github/create-issue',
-                type: 'POST',
-                data: formData + '&_token=' + $('meta[name="csrf-token"]').attr('content'),
-                success: function(response) {
-                    if (response.status === 'success') {
+            var button = $(this);
+            button.button('loading');
+
+            var data = new FormData();
+            var form = $('#github-create-issue-form').serializeArray();
+            for (var field in form) {
+                data.append(form[field].name, form[field].value);
+            }
+            data.append('conversation_id', getGlobalAttr('conversation_id'));
+
+            fsAjax(
+                data,
+                laroute.route('github.create_issue'),
+                function(response) {
+                    button.button('reset');
+                    if (isAjaxSuccess(response)) {
                         $('#github-create-issue-modal').modal('hide');
-                        GitHub.showAlert('success', response.message);
-                        GitHub.refreshSidebar();
+                        window.location.href = '';
                     } else {
-                        GitHub.showAlert('error', response.message);
+                        showAjaxError(response);
                     }
-                },
-                error: function(xhr) {
-                    var response = xhr.responseJSON || {message: 'An error occurred'};
-                    GitHub.showAlert('error', response.message);
-                },
-                complete: function() {
-                    GitHub.setButtonLoading($btn, false);
+                }, true,
+                function(response) {
+                    showFloatingAlert('error', Lang.get("messages.ajax_error"));
+                    ajaxFinish();
+                }, {
+                    cache: false,
+                    contentType: false,
+                    processData: false
                 }
-            });
-        },
-
-        // Link issue
-        linkIssue: function(e) {
-            e.preventDefault();
-            var $btn = $(this);
-            var formData = $('#github-link-issue-form').serialize();
-            
-            GitHub.setButtonLoading($btn, true);
-            
-            $.ajax({
-                url: '/github/link-issue',
-                type: 'POST',
-                data: formData + '&_token=' + $('meta[name="csrf-token"]').attr('content'),
-                success: function(response) {
-                    if (response.status === 'success') {
-                        $('#github-link-issue-modal').modal('hide');
-                        GitHub.showAlert('success', response.message);
-                        GitHub.refreshSidebar();
-                    } else {
-                        GitHub.showAlert('error', response.message);
-                    }
-                },
-                error: function(xhr) {
-                    var response = xhr.responseJSON || {message: 'An error occurred'};
-                    GitHub.showAlert('error', response.message);
-                },
-                complete: function() {
-                    GitHub.setButtonLoading($btn, false);
-                }
-            });
-        },
-
-        // Utility functions
-        setButtonLoading: function($btn, loading) {
-            var $icon = $btn.find('.fa').first();
-            var originalIcon = $icon.data('original-icon') || $icon.attr('class');
-            
-            if (loading) {
-                $icon.data('original-icon', originalIcon);
-                $icon.attr('class', 'fa fa-spinner fa-spin');
-                $btn.prop('disabled', true);
-            } else {
-                $icon.attr('class', originalIcon);
-                $btn.prop('disabled', false);
-            }
-        },
-
-        showAlert: function(type, message) {
-            // Use FreeScout's notification system if available
-            if (typeof showFloatingAlert === 'function') {
-                showFloatingAlert(type, message);
-            } else {
-                // Fallback to console
-                console.log(type.toUpperCase() + ':', message);
-            }
-        },
-
-        showConnectionResult: function(response) {
-            var alertClass = response.status === 'success' ? 'alert-success' : 'alert-danger';
-            var icon = response.status === 'success' ? 'fa-check-circle' : 'fa-times-circle';
-            
-            $('#connection-result').html(
-                '<div class="alert ' + alertClass + '">' +
-                    '<i class="fa ' + icon + '"></i> ' + response.message +
-                '</div>'
             );
-            
-            $('#connection-status-modal').modal('show');
-        },
+        });
 
-        refreshSidebar: function() {
-            // Reload the page to refresh the sidebar
-            // In a real implementation, this could be more sophisticated
-            window.location.reload();
-        },
+        // Link issue button
+        $(document).on('click', '#github-link-issue-btn', function(e) {
+            e.preventDefault();
+            var button = $(this);
+            button.button('loading');
 
-        getConversationId: function() {
-            return $('input[name="conversation_id"]').val() || 
-                   $('meta[name="conversation-id"]').attr('content');
-        },
+            var data = new FormData();
+            var form = $('#github-link-issue-form').serializeArray();
+            for (var field in form) {
+                data.append(form[field].name, form[field].value);
+            }
+            data.append('conversation_id', getGlobalAttr('conversation_id'));
 
-        getConversationSubject: function() {
-            return $('meta[name="conversation-subject"]').attr('content') || 
-                   $('.conversation-subject').text();
-        },
-
-        formatDate: function(dateString) {
-            return new Date(dateString).toLocaleDateString();
-        },
-
-        debounce: function(func, wait) {
-            var timeout;
-            return function() {
-                var context = this, args = arguments;
-                clearTimeout(timeout);
-                timeout = setTimeout(function() {
-                    func.apply(context, args);
-                }, wait);
-            };
-        }
-    };
-
-    // Initialize when document is ready
-    $(document).ready(function() {
-        GitHub.init();
+            fsAjax(
+                data,
+                laroute.route('github.link_issue'),
+                function(response) {
+                    button.button('reset');
+                    if (isAjaxSuccess(response)) {
+                        $('#github-link-issue-modal').modal('hide');
+                        window.location.href = '';
+                    } else {
+                        showAjaxError(response);
+                    }
+                }, true,
+                function(response) {
+                    showFloatingAlert('error', Lang.get("messages.ajax_error"));
+                    ajaxFinish();
+                }, {
+                    cache: false,
+                    contentType: false,
+                    processData: false
+                }
+            );
+        });
     });
+}
 
-})(jQuery);
+function githubLoadRepositories() {
+    var $loadingDiv = $('#github-repositories-loading');
+    var $refreshBtn = $('#refresh-repositories');
+    
+    // Show loading indicator
+    $loadingDiv.show();
+    $refreshBtn.find('.fa').addClass('fa-spin');
+    
+    fsAjax({}, 
+    laroute.route('github.repositories'), 
+    function(response) {
+        if (isAjaxSuccess(response)) {
+            githubPopulateRepositories(response.repositories);
+            
+            // Cache repositories in localStorage with timestamp
+            var cacheData = {
+                repositories: response.repositories,
+                timestamp: Date.now(),
+                token_hash: $('#github_token').val() ? btoa($('#github_token').val()).slice(-8) : null // Last 8 chars of token for validation
+            };
+            localStorage.setItem('github_repositories_cache', JSON.stringify(cacheData));
+        } else {
+            showFloatingAlert('error', 'Failed to load repositories: ' + (response.message || 'Unknown error'));
+        }
+        $loadingDiv.hide();
+        $refreshBtn.find('.fa').removeClass('fa-spin');
+    }, true, function() {
+        // Error callback
+        $loadingDiv.hide();
+        $refreshBtn.find('.fa').removeClass('fa-spin');
+        showFloatingAlert('error', 'Failed to load repositories');
+    });
+}
+
+// Check if we have cached repositories
+function githubGetCachedRepositories() {
+    try {
+        var cached = localStorage.getItem('github_repositories_cache');
+        if (!cached) return null;
+        
+        var cacheData = JSON.parse(cached);
+        var currentTokenHash = $('#github_token').val() ? btoa($('#github_token').val()).slice(-8) : null;
+        
+        // Check if cache is less than 1 hour old and token matches
+        var maxAge = 60 * 60 * 1000; // 1 hour
+        var isValid = (Date.now() - cacheData.timestamp) < maxAge && 
+                     cacheData.token_hash === currentTokenHash &&
+                     cacheData.repositories && cacheData.repositories.length > 0;
+        
+        if (isValid) {
+            return cacheData.repositories;
+        } else {
+            localStorage.removeItem('github_repositories_cache');
+            return null;
+        }
+    } catch (e) {
+        localStorage.removeItem('github_repositories_cache');
+        return null;
+    }
+}
+
+// Helper function to set default repository from DOM data
+function githubSetDefaultRepository(selectId) {
+    var select = $(selectId);
+    if (select.length === 0) return;
+    
+    // Check for backend default first
+    if (GitHub.defaultRepository && selectId !== '#github_default_repository') {
+        select.val(GitHub.defaultRepository).trigger('change');
+        return;
+    }
+    
+    // Check if there's already a selected option in the HTML (from Blade template)
+    var defaultOption = select.find('option[selected]').first();
+    if (defaultOption.length > 0) {
+        select.val(defaultOption.val()).trigger('change');
+    }
+}
+
+function githubPopulateRepositories(repositories) {
+    // Cache repositories for reuse
+    GitHub.cache.repositories = repositories;
+    
+    var selects = ['#github_default_repository', '#github-repository', '#github-link-repository'];
+    
+    $.each(selects, function(i, selectId) {
+        var select = $(selectId);
+        if (select.length === 0) return;
+        
+        var currentValue = select.val();
+        var defaultOption = select.find('option[selected]').first();
+        var defaultValue = defaultOption.length > 0 ? defaultOption.val() : '';
+        
+        // Use GitHub.defaultRepository if available and we're not in settings
+        var backendDefault = (selectId !== '#github_default_repository' && GitHub.defaultRepository) ? GitHub.defaultRepository : '';
+        
+        // For settings page, preserve any manually entered value
+        if (selectId === '#github_default_repository' && currentValue) {
+            // Remove all options except the placeholder and current value
+            select.find('option').each(function() {
+                if ($(this).val() !== '' && $(this).val() !== currentValue) {
+                    $(this).remove();
+                }
+            });
+        } else {
+            select.empty().append('<option value="">' + Lang.get("messages.select_repository") + '</option>');
+        }
+        
+        // Determine which value should be selected (priority: current -> backend default -> template default)
+        var valueToSelect = currentValue || backendDefault || defaultValue;
+        
+        // Add repositories that have issues enabled
+        var foundRepository = false;
+        $.each(repositories, function(i, repo) {
+            if (repo.has_issues) {
+                // Check if option already exists
+                if (select.find('option[value="' + repo.full_name + '"]').length === 0) {
+                    var selected = repo.full_name === valueToSelect ? 'selected' : '';
+                    if (repo.full_name === valueToSelect) {
+                        foundRepository = true;
+                    }
+                    select.append('<option value="' + repo.full_name + '" ' + selected + '>' + repo.full_name + '</option>');
+                }
+            }
+        });
+        
+        // Set the value if we have a value to select
+        if (valueToSelect) {
+            select.val(valueToSelect);
+        }
+        
+        // Show warning if repository not found
+        if (valueToSelect && repositories.length > 0 && !foundRepository) {
+            // Only show warning once per repository
+            var warningKey = 'repo_not_found_' + valueToSelect;
+            if (GitHub.warningsShown.indexOf(warningKey) === -1) {
+                GitHub.warningsShown.push(warningKey);
+                showFloatingAlert('warning', Lang.get("messages.current_repository_not_found") + ': ' + valueToSelect);
+            }
+        }
+    });
+}
+
+function githubLoadRepositoryLabels(repository) {
+    $.ajax({
+        url: '/github/labels/' + encodeURIComponent(repository),
+        type: 'GET',
+        success: function(response) {
+            if (response.status === 'success') {
+                githubPopulateLabels(response.data);
+            }
+        },
+        error: function(xhr) {
+            console.error('Failed to load labels:', xhr);
+        }
+    });
+}
+
+function githubPopulateLabels(labels) {
+    var select = $('#github-issue-labels');
+    select.empty();
+    
+    $.each(labels, function(i, label) {
+        select.append('<option value="' + label.name + '">' + label.name + '</option>');
+    });
+}
+
+function githubLoadLabelMappings(repository) {
+    $.ajax({
+        url: laroute.route('github.label_mappings'),
+        type: 'GET',
+        data: { repository: repository },
+        success: function(response) {
+            if (response.status === 'success') {
+                githubRenderLabelMappings(response.data);
+            }
+        },
+        error: function(xhr) {
+            console.error('Failed to load label mappings:', xhr);
+        }
+    });
+}
+
+function githubRenderLabelMappings(mappings) {
+    var container = $('#label-mappings-container');
+    container.empty();
+
+    if (mappings.length === 0) {
+        container.html('<p class="text-muted">No label mappings configured</p>');
+        return;
+    }
+
+    $.each(mappings, function(i, mapping) {
+        githubAddLabelMappingRow(mapping);
+    });
+}
+
+function githubAddLabelMappingRow(mapping) {
+    mapping = mapping || {};
+    
+    var html = '<div class="label-mapping-row">' +
+        '<input type="text" class="form-control" name="freescout_tag" placeholder="FreeScout Tag" value="' + (mapping.freescout_tag || '') + '">' +
+        '<span>→</span>' +
+        '<input type="text" class="form-control" name="github_label" placeholder="GitHub Label" value="' + (mapping.github_label || '') + '">' +
+        '<input type="number" class="form-control" name="confidence_threshold" placeholder="0.80" value="' + (mapping.confidence_threshold || 0.80) + '" min="0" max="1" step="0.01">' +
+        '<button type="button" class="btn btn-danger btn-sm remove-mapping">' +
+            '<i class="fa fa-trash"></i>' +
+        '</button>' +
+    '</div>';
+
+    $('#label-mappings-container').append(html);
+}
+
+function githubSearchIssues(repository, query) {
+    fsAjax({
+        repository: repository,
+        query: query,
+        per_page: GitHub.config.maxSearchResults
+    }, 
+    laroute.route('github.search_issues'), 
+    function(response) {
+        if (isAjaxSuccess(response)) {
+            githubDisplaySearchResults(response.issues);
+        }
+    }, true);
+}
+
+function githubDisplaySearchResults(issues) {
+    var container = $('#github-search-results-list');
+    container.empty();
+    
+    if (issues.length === 0) {
+        container.html('<p class="text-muted">No issues found</p>');
+    } else {
+        $.each(issues, function(i, issue) {
+            var badgeClass = issue.state === 'open' ? 'success' : 'secondary';
+            var html = '<div class="github-search-result-item" data-issue-number="' + issue.number + '">' +
+                '<div class="github-search-result-number">#' + issue.number + '</div>' +
+                '<div class="github-search-result-title">' + issue.title + '</div>' +
+                '<div class="github-search-result-meta">' +
+                    '<span class="badge badge-' + badgeClass + '">' + issue.state + '</span>' +
+                    ' • Updated ' + githubFormatDate(issue.updated_at) +
+                '</div>' +
+            '</div>';
+            container.append(html);
+        });
+    }
+    
+    $('#github-search-results').show();
+}
+
+function githubGenerateIssueContent() {
+    var conversationId = $('#github-create-issue-form input[name="conversation_id"]').val();
+    
+    if (!conversationId) {
+        showFloatingAlert('error', 'No conversation ID found');
+        return;
+    }
+    
+    // Show loading state
+    var $titleField = $('#github-issue-title');
+    var $bodyField = $('#github-issue-body');
+    var $generateBtn = $('#github-generate-content-btn');
+    
+    $generateBtn.prop('disabled', true).find('i').removeClass('fa-magic').addClass('fa-spinner fa-spin');
+    
+    $.ajax({
+        url: '/github/generate-content',
+        type: 'POST',
+        data: {
+            conversation_id: conversationId,
+            _token: $('meta[name="csrf-token"]').attr('content')
+        },
+        success: function(response) {
+            if (response.status === 'success') {
+                if (response.data.title && !$titleField.val()) {
+                    $titleField.val(response.data.title);
+                }
+                if (response.data.body && !$bodyField.val()) {
+                    $bodyField.val(response.data.body);
+                }
+                showFloatingAlert('success', 'Content generated successfully');
+            } else {
+                showFloatingAlert('error', response.message || 'Failed to generate content');
+            }
+        },
+        error: function(xhr) {
+            var response = xhr.responseJSON || {};
+            var errorMessage = response.message || 'Failed to generate content';
+            showFloatingAlert('error', errorMessage);
+        },
+        complete: function() {
+            $generateBtn.prop('disabled', false).find('i').removeClass('fa-spinner fa-spin').addClass('fa-magic');
+        }
+    });
+}
+
+function githubFormatDate(dateString) {
+    return new Date(dateString).toLocaleDateString();
+}
+
+function githubShowConnectionResult(response) {
+    var $resultDiv = $('#github-connection-result');
+    var $alert = $resultDiv.find('.alert');
+    var $message = $resultDiv.find('.github-connection-message');
+    
+    // Remove existing classes
+    $alert.removeClass('alert-success alert-danger alert-warning');
+    
+    if (response.status === 'success') {
+        $alert.addClass('alert-success');
+        var message = '<strong>' + Lang.get("messages.successful") + '</strong><br>';
+        
+        if (response.user) {
+            message += Lang.get("messages.connected_as") + ': ' + response.user + '<br>';
+        }
+        if (response.permissions) {
+            message += Lang.get("messages.permissions") + ': ' + response.permissions.join(', ') + '<br>';
+        }
+        if (response.rate_limit) {
+            message += Lang.get("messages.api_calls_remaining") + ': ' + response.rate_limit.remaining + '/' + response.rate_limit.limit;
+        }
+        
+        $message.html(message);
+    } else {
+        $alert.addClass('alert-danger');
+        var errorMessage = '<strong>' + Lang.get("messages.error") + ':</strong> ' + (response.message || 'Unknown error');
+        
+        // Add troubleshooting hints based on error type
+        if (response.message && response.message.includes('401')) {
+            errorMessage += '<br><small>' + Lang.get("messages.check_token_valid") + '</small>';
+        } else if (response.message && response.message.includes('404')) {
+            errorMessage += '<br><small>' + Lang.get("messages.check_token_permissions") + '</small>';
+        }
+        
+        $message.html(errorMessage);
+    }
+    
+    $resultDiv.fadeIn();
+    
+    // Also show floating alert for quick feedback
+    var alertType = response.status === 'success' ? 'success' : 'error';
+    showFloatingAlert(alertType, response.message || 'Unknown response');
+}
+
+// Auto-initialize when DOM is ready
+$(document).ready(function() {
+    // Check if we're on a page with GitHub sidebar
+    var $githubSidebar = $('.github-sidebar-block');
+    if ($githubSidebar.length > 0) {
+        // Get default repository from data attribute
+        var defaultRepo = $githubSidebar.data('default-repository');
+        if (defaultRepo) {
+            GitHub.defaultRepository = defaultRepo;
+        }
+        
+        // Initialize the GitHub modals functionality
+        githubInitModals();
+        
+        // Initialize sidebar action handlers
+        githubInitSidebarActions();
+        
+        // Load repositories into cache if not already loaded
+        if (!GitHub.cache.repositories) {
+            githubLoadRepositories();
+        }
+    }
+    
+    // Check if we're on the settings page
+    if ($('#github_default_repository').length > 0) {
+        githubInitSettings();
+        
+        // Auto-load repositories if token exists
+        if ($('#github_token').val()) {
+            // Try to load from cache first
+            var cachedRepos = githubGetCachedRepositories();
+            if (cachedRepos) {
+                githubPopulateRepositories(cachedRepos);
+            } else {
+                githubLoadRepositories();
+            }
+        }
+    }
+});
+
+// Missing functions that were in the sidebar template
+function githubCreateIssue() {
+    $('#github-create-issue-btn').click(function() {
+        var formData = $('#github-create-issue-form').serialize();
+        var $btn = $(this);
+        
+        $btn.prop('disabled', true);
+        $btn.find('.fa').removeClass('fa-plus').addClass('fa-spinner fa-spin');
+        
+        $.ajax({
+            url: laroute.route('github.create_issue'),
+            type: 'POST',
+            data: formData + '&_token=' + $('meta[name="csrf-token"]').attr('content'),
+            success: function(response) {
+                if (response.status === 'success') {
+                    $('#github-create-issue-modal').modal('hide');
+                    showFloatingAlert('success', response.message);
+                    window.location.reload(); // Refresh to show new issue
+                } else {
+                    showFloatingAlert('error', response.message);
+                }
+            },
+            error: function(xhr) {
+                var response = xhr.responseJSON || {};
+                var errorMessage = 'An error occurred';
+                
+                if (response.message) {
+                    errorMessage = response.message;
+                } else if (response.errors) {
+                    // Handle validation errors
+                    var errors = [];
+                    for (var field in response.errors) {
+                        if (response.errors.hasOwnProperty(field)) {
+                            errors = errors.concat(response.errors[field]);
+                        }
+                    }
+                    errorMessage = errors.length > 0 ? errors.join(', ') : 'Validation failed';
+                } else if (xhr.status === 422) {
+                    errorMessage = 'The given data was invalid. Please check your input and try again.';
+                } else if (xhr.status === 403) {
+                    errorMessage = 'You do not have permission to perform this action.';
+                } else if (xhr.status === 404) {
+                    errorMessage = 'The requested resource was not found.';
+                } else if (xhr.status >= 500) {
+                    errorMessage = 'Server error occurred. Please try again later.';
+                }
+                
+                showFloatingAlert('error', errorMessage);
+            },
+            complete: function() {
+                $btn.prop('disabled', false);
+                $btn.find('.fa').removeClass('fa-spinner fa-spin').addClass('fa-plus');
+            }
+        });
+    });
+}
+
+function githubLinkIssue() {
+    $('#github-link-issue-btn').click(function() {
+        var formData = $('#github-link-issue-form').serialize();
+        var $btn = $(this);
+        
+        $btn.prop('disabled', true);
+        $btn.find('.fa').removeClass('fa-link').addClass('fa-spinner fa-spin');
+        
+        $.ajax({
+            url: laroute.route('github.link_issue'),
+            type: 'POST',
+            data: formData + '&_token=' + $('meta[name="csrf-token"]').attr('content'),
+            success: function(response) {
+                if (response.status === 'success') {
+                    $('#github-link-issue-modal').modal('hide');
+                    showFloatingAlert('success', response.message);
+                    window.location.reload(); // Refresh to show linked issue
+                } else {
+                    showFloatingAlert('error', response.message);
+                }
+            },
+            error: function(xhr) {
+                var response = xhr.responseJSON || {};
+                var errorMessage = 'An error occurred';
+                
+                if (response.message) {
+                    errorMessage = response.message;
+                } else if (response.errors) {
+                    // Handle validation errors
+                    var errors = [];
+                    for (var field in response.errors) {
+                        if (response.errors.hasOwnProperty(field)) {
+                            errors = errors.concat(response.errors[field]);
+                        }
+                    }
+                    errorMessage = errors.length > 0 ? errors.join(', ') : 'Validation failed';
+                } else if (xhr.status === 422) {
+                    errorMessage = 'The given data was invalid. Please check your input and try again.';
+                } else if (xhr.status === 403) {
+                    errorMessage = 'You do not have permission to perform this action.';
+                } else if (xhr.status === 404) {
+                    errorMessage = 'The requested resource was not found.';
+                } else if (xhr.status >= 500) {
+                    errorMessage = 'Server error occurred. Please try again later.';
+                }
+                
+                showFloatingAlert('error', errorMessage);
+            },
+            complete: function() {
+                $btn.prop('disabled', false);
+                $btn.find('.fa').removeClass('fa-spinner fa-spin').addClass('fa-link');
+            }
+        });
+    });
+}
+
+function githubInitSidebarActions() {
+    $(document).ready(function() {
+        // Initialize create and link issue handlers
+        githubCreateIssue();
+        githubLinkIssue();
+        
+        // Issue actions
+        $(document).on('click', '.github-issue-action', function(e) {
+            e.preventDefault();
+            var action = $(this).data('action');
+            var issueId = $(this).data('issue-id');
+            
+            if (action === 'unlink') {
+                if (confirm('Are you sure you want to unlink this issue?')) {
+                    githubUnlinkIssue(issueId);
+                }
+            } else if (action === 'refresh') {
+                githubRefreshIssue(issueId);
+            }
+        });
+        
+        // Search result selection
+        $(document).on('click', '.github-search-result-item', function() {
+            var issueNumber = $(this).data('issue-number');
+            $('#github-issue-number').val(issueNumber);
+            $('#github-search-results').hide();
+        });
+    });
+}
+
+function githubUnlinkIssue(issueId) {
+    $.ajax({
+        url: laroute.route('github.unlink_issue'),
+        type: 'POST',
+        data: {
+            _token: $('meta[name="csrf-token"]').attr('content'),
+            conversation_id: $('#github-create-issue-form input[name="conversation_id"]').val(),
+            issue_id: issueId
+        },
+        success: function(response) {
+            if (response.status === 'success') {
+                showFloatingAlert('success', response.message);
+                window.location.reload();
+            } else {
+                showFloatingAlert('error', response.message);
+            }
+        }
+    });
+}
+
+function githubRefreshIssue(issueId) {
+    $('[data-issue-id="' + issueId + '"]').find('.fa-refresh').addClass('fa-spin');
+    
+    $.ajax({
+        url: laroute.route('github.issue_details', issueId),
+        type: 'GET',
+        success: function(response) {
+            if (response.status === 'success') {
+                window.location.reload();
+            }
+        },
+        complete: function() {
+            $('[data-issue-id="' + issueId + '"]').find('.fa-refresh').removeClass('fa-spin');
+        }
+    });
+}

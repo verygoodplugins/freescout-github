@@ -19,9 +19,36 @@ class GithubController extends Controller
      */
     public function testConnection(Request $request)
     {
-        $result = GithubApiClient::testConnection();
-        
-        return response()->json($result);
+        try {
+            $token = $request->input('token');
+            
+            if (!$token) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'GitHub token is required'
+                ]);
+            }
+            
+            $result = GithubApiClient::testConnection($token);
+            
+            if ($result['status'] === 'success') {
+                return response()->json([
+                    'status' => 'success',
+                    'message' => $result['message'],
+                    'repositories' => $result['data']['repositories'] ?? []
+                ]);
+            } else {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $result['message']
+                ]);
+            }
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Connection test failed: ' . $e->getMessage()
+            ]);
+        }
     }
 
     /**
@@ -31,7 +58,17 @@ class GithubController extends Controller
     {
         $result = GithubApiClient::getRepositories();
         
-        return response()->json($result);
+        if ($result['status'] === 'success') {
+            return response()->json([
+                'status' => 'success',
+                'repositories' => $result['data']
+            ]);
+        } else {
+            return response()->json([
+                'status' => 'error',
+                'message' => $result['message']
+            ]);
+        }
     }
 
     /**
@@ -39,10 +76,27 @@ class GithubController extends Controller
      */
     public function getLabels(Request $request, $repository)
     {
-        $repository = urldecode($repository);
-        $result = GithubApiClient::getLabels($repository);
-        
-        return response()->json($result);
+        try {
+            $repository = urldecode($repository);
+            $result = GithubApiClient::getLabels($repository);
+            
+            if ($result['status'] === 'success') {
+                return response()->json([
+                    'status' => 'success',
+                    'data' => $result['data'] ?? $result['labels'] ?? []
+                ]);
+            } else {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $result['message'] ?? 'Failed to load labels'
+                ], 400);
+            }
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to load labels: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
@@ -57,14 +111,31 @@ class GithubController extends Controller
             'per_page' => 'nullable|integer|min:1|max:100'
         ]);
 
-        $result = GithubApiClient::searchIssues(
-            $request->get('repository'),
-            $request->get('query', ''),
-            $request->get('state', 'open'),
-            $request->get('per_page', 20)
-        );
+        try {
+            $result = GithubApiClient::searchIssues(
+                $request->get('repository'),
+                $request->get('query', ''),
+                $request->get('state', 'open'),
+                $request->get('per_page', 20)
+            );
 
-        return response()->json($result);
+            if ($result['status'] === 'success') {
+                return response()->json([
+                    'status' => 'success',
+                    'data' => $result['data'] ?? $result['issues'] ?? []
+                ]);
+            } else {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $result['message'] ?? 'Failed to search issues'
+                ], 400);
+            }
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to search issues: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
@@ -402,6 +473,145 @@ class GithubController extends Controller
             \Helper::logException($e, '[GitHub] Webhook Error');
             
             return response()->json(['error' => 'Internal server error'], 500);
+        }
+    }
+
+    /**
+     * Save GitHub settings from settings page
+     */
+    public function saveSettings(Request $request)
+    {
+        $settings = $request->input('settings', []);
+        $allowed = [
+            'github.token',
+            'github.default_repository',
+            'github.webhook_secret',
+            'github.organizations',
+            'github.ai_service',
+            'github.ai_api_key',
+            'github.create_remote_link',
+            'github.sync_status',
+            'github.auto_assign_labels',
+        ];
+        foreach ($allowed as $key) {
+            if (array_key_exists($key, $settings)) {
+                // Checkbox values: if not set, set to 0
+                $value = $settings[$key];
+                if (in_array($key, ['github.create_remote_link', 'github.sync_status', 'github.auto_assign_labels'])) {
+                    $value = $value ? 1 : 0;
+                }
+                \Option::set($key, $value);
+            } else if (in_array($key, ['github.create_remote_link', 'github.sync_status', 'github.auto_assign_labels'])) {
+                // Unchecked checkboxes
+                \Option::set($key, 0);
+            }
+        }
+        return redirect()->back()->with('success', __('Settings saved.'));
+    }
+    
+    /**
+     * Generate AI content for issue
+     */
+    public function generateContent(Request $request)
+    {
+        $request->validate([
+            'conversation_id' => 'required|integer|exists:conversations,id'
+        ]);
+
+        $conversation = Conversation::findOrFail($request->get('conversation_id'));
+        
+        // Permission check
+        if (!$conversation->userCanUpdate()) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'You do not have permission to access this conversation'
+            ], 403);
+        }
+
+        try {
+            $contentGenerator = new IssueContentGenerator();
+            $generatedContent = $contentGenerator->generateContent($conversation);
+            
+            return response()->json([
+                'status' => 'success',
+                'data' => $generatedContent
+            ]);
+        } catch (\Exception $e) {
+            \Helper::logException($e, '[GitHub] Generate Content Error');
+            
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to generate content: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * Test token and show detailed API responses
+     */
+    public function testToken()
+    {
+        try {
+            $results = [];
+            
+            // Test 1: Basic user info
+            $userResponse = GithubApiClient::apiCall('user');
+            $results['user'] = $userResponse;
+            
+            // Test 2: User repositories
+            $userReposResponse = GithubApiClient::apiCall('user/repos', [
+                'per_page' => 10,
+                'type' => 'all'
+            ]);
+            $results['user_repos'] = [
+                'status' => $userReposResponse['status'],
+                'count' => $userReposResponse['status'] === 'success' ? count($userReposResponse['data']) : 0,
+                'repos' => $userReposResponse['status'] === 'success' ? array_map(function($repo) {
+                    return ['full_name' => $repo['full_name'], 'private' => $repo['private']];
+                }, array_slice($userReposResponse['data'], 0, 5)) : []
+            ];
+            
+            // Test 3: Organizations
+            $orgsResponse = GithubApiClient::apiCall('user/orgs');
+            $results['organizations'] = [
+                'status' => $orgsResponse['status'],
+                'count' => $orgsResponse['status'] === 'success' ? count($orgsResponse['data']) : 0,
+                'orgs' => $orgsResponse['status'] === 'success' ? array_map(function($org) {
+                    return $org['login'];
+                }, $orgsResponse['data']) : []
+            ];
+            
+            // Test 4: Specific org repos (verygoodplugins)
+            $vgpReposResponse = GithubApiClient::apiCall('orgs/verygoodplugins/repos', [
+                'per_page' => 10,
+                'type' => 'all'
+            ]);
+            $results['verygoodplugins_repos'] = [
+                'status' => $vgpReposResponse['status'],
+                'message' => $vgpReposResponse['message'] ?? null,
+                'count' => $vgpReposResponse['status'] === 'success' ? count($vgpReposResponse['data']) : 0,
+                'repos' => $vgpReposResponse['status'] === 'success' ? array_map(function($repo) {
+                    return ['full_name' => $repo['full_name'], 'private' => $repo['private']];
+                }, array_slice($vgpReposResponse['data'], 0, 5)) : []
+            ];
+            
+            // Test 5: Check specific repo
+            $wpFusionResponse = GithubApiClient::apiCall('repos/verygoodplugins/wp-fusion');
+            $results['wp_fusion_direct'] = [
+                'status' => $wpFusionResponse['status'],
+                'message' => $wpFusionResponse['message'] ?? null,
+                'exists' => $wpFusionResponse['status'] === 'success',
+                'private' => $wpFusionResponse['status'] === 'success' ? $wpFusionResponse['data']['private'] : null,
+                'has_issues' => $wpFusionResponse['status'] === 'success' ? $wpFusionResponse['data']['has_issues'] : null
+            ];
+            
+            return response()->json($results, 200, [], JSON_PRETTY_PRINT);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ], 500);
         }
     }
 }

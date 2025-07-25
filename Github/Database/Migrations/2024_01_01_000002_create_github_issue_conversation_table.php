@@ -13,19 +13,21 @@ class CreateGithubIssueConversationTable extends Migration
      */
     public function up()
     {
-        Schema::create('github_issue_conversation', function (Blueprint $table) {
-            $table->id();
-            $table->unsignedBigInteger('github_issue_id');
-            $table->unsignedBigInteger('conversation_id');
-            $table->timestamps();
-            
-            // Foreign key constraints
-            $table->foreign('github_issue_id')->references('id')->on('github_issues')->onDelete('cascade');
-            $table->foreign('conversation_id')->references('id')->on('conversations')->onDelete('cascade');
-            
-            // Unique constraint to prevent duplicate links
-            $table->unique(['github_issue_id', 'conversation_id']);
-        });
+        if (!Schema::hasTable('github_issue_conversation')) {
+            Schema::create('github_issue_conversation', function (Blueprint $table) {
+                $table->increments('id');
+                $table->unsignedInteger('github_issue_id');
+                $table->unsignedInteger('conversation_id');
+                $table->timestamps();
+                
+                // Foreign key constraints
+                $table->foreign('github_issue_id')->references('id')->on('github_issues')->onDelete('cascade');
+                $table->foreign('conversation_id')->references('id')->on('conversations')->onDelete('cascade');
+                
+                // Unique constraint to prevent duplicate links
+                $table->unique(['github_issue_id', 'conversation_id']);
+            });
+        }
     }
 
     /**

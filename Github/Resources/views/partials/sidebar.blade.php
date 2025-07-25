@@ -1,5 +1,5 @@
 @if(\Option::get('github.token'))
-<div class="sidebar-block">
+<div class="sidebar-block github-sidebar-block" data-default-repository="{{ \Option::get('github.default_repository') }}">
     <div class="sidebar-block-header">
         <h3>
             <i class="fa fa-github"></i>
@@ -114,18 +114,26 @@
                     <div class="form-group">
                         <label for="github-repository">{{ __('Repository') }}</label>
                         <select class="form-control" name="repository" id="github-repository" required>
-                            <option value="">{{ __('Select Repository') }}</option>
-                            @if(\Option::get('github.default_repository'))
-                                <option value="{{ \Option::get('github.default_repository') }}" selected>
-                                    {{ \Option::get('github.default_repository') }}
-                                </option>
+                            <option value="">Select Repository</option>
+                            @php
+                                $defaultRepo = \Option::get('github.default_repository');
+                            @endphp
+                            @if($defaultRepo)
+                                <option value="{{ $defaultRepo }}" selected>{{ $defaultRepo }}</option>
                             @endif
                         </select>
                     </div>
                     
                     <div class="form-group">
                         <label for="github-issue-title">{{ __('Title') }}</label>
-                        <input type="text" class="form-control" name="title" id="github-issue-title" maxlength="255" required>
+                        <div class="input-group">
+                            <input type="text" class="form-control" name="title" id="github-issue-title" maxlength="255" required>
+                            <div class="input-group-btn">
+                                <button type="button" class="btn btn-default" id="github-generate-content-btn" title="{{ __('Generate with AI') }}">
+                                    <i class="fa fa-magic"></i>
+                                </button>
+                            </div>
+                        </div>
                     </div>
                     
                     <div class="form-group">
@@ -200,11 +208,12 @@
                     <div class="form-group">
                         <label for="github-link-repository">{{ __('Repository') }}</label>
                         <select class="form-control" name="repository" id="github-link-repository" required>
-                            <option value="">{{ __('Select Repository') }}</option>
-                            @if(\Option::get('github.default_repository'))
-                                <option value="{{ \Option::get('github.default_repository') }}" selected>
-                                    {{ \Option::get('github.default_repository') }}
-                                </option>
+                            <option value="">Select Repository</option>
+                            @php
+                                $defaultRepo = \Option::get('github.default_repository');
+                            @endphp
+                            @if($defaultRepo)
+                                <option value="{{ $defaultRepo }}" selected>{{ $defaultRepo }}</option>
                             @endif
                         </select>
                     </div>
@@ -373,292 +382,4 @@
 }
 </style>
 
-<script>
-$(document).ready(function() {
-    // Load repositories when modals are opened
-    $('#github-create-issue-modal, #github-link-issue-modal').on('show.bs.modal', function() {
-        loadRepositories();
-    });
-
-    // Auto-generate content when checkbox is checked
-    $('#github-auto-generate').change(function() {
-        if ($(this).is(':checked')) {
-            generateIssueContent();
-        }
-    });
-
-    // Repository change in create modal
-    $('#github-repository').change(function() {
-        var repository = $(this).val();
-        if (repository) {
-            loadRepositoryLabels(repository);
-        }
-    });
-
-    // Issue search
-    $('#github-issue-search').on('input', debounce(function() {
-        var repository = $('#github-link-repository').val();
-        var query = $(this).val();
-        
-        if (repository && query.length > 2) {
-            searchGitHubIssues(repository, query);
-        } else {
-            $('#github-search-results').hide();
-        }
-    }, 300));
-
-    // Create issue
-    $('#github-create-issue-btn').click(function() {
-        var formData = $('#github-create-issue-form').serialize();
-        var $btn = $(this);
-        
-        $btn.prop('disabled', true);
-        $btn.find('.fa').removeClass('fa-plus').addClass('fa-spinner fa-spin');
-        
-        $.ajax({
-            url: '{{ route("github.create_issue") }}',
-            type: 'POST',
-            data: formData + '&_token={{ csrf_token() }}',
-            success: function(response) {
-                if (response.status === 'success') {
-                    $('#github-create-issue-modal').modal('hide');
-                    showSuccessMessage(response.message);
-                    refreshGitHubIssues();
-                } else {
-                    showErrorMessage(response.message);
-                }
-            },
-            error: function(xhr) {
-                var response = xhr.responseJSON || {message: 'An error occurred'};
-                showErrorMessage(response.message);
-            },
-            complete: function() {
-                $btn.prop('disabled', false);
-                $btn.find('.fa').removeClass('fa-spinner fa-spin').addClass('fa-plus');
-            }
-        });
-    });
-
-    // Link issue
-    $('#github-link-issue-btn').click(function() {
-        var formData = $('#github-link-issue-form').serialize();
-        var $btn = $(this);
-        
-        $btn.prop('disabled', true);
-        $btn.find('.fa').removeClass('fa-link').addClass('fa-spinner fa-spin');
-        
-        $.ajax({
-            url: '{{ route("github.link_issue") }}',
-            type: 'POST',
-            data: formData + '&_token={{ csrf_token() }}',
-            success: function(response) {
-                if (response.status === 'success') {
-                    $('#github-link-issue-modal').modal('hide');
-                    showSuccessMessage(response.message);
-                    refreshGitHubIssues();
-                } else {
-                    showErrorMessage(response.message);
-                }
-            },
-            error: function(xhr) {
-                var response = xhr.responseJSON || {message: 'An error occurred'};
-                showErrorMessage(response.message);
-            },
-            complete: function() {
-                $btn.prop('disabled', false);
-                $btn.find('.fa').removeClass('fa-spinner fa-spin').addClass('fa-link');
-            }
-        });
-    });
-
-    // Issue actions
-    $(document).on('click', '.github-issue-action', function(e) {
-        e.preventDefault();
-        var action = $(this).data('action');
-        var issueId = $(this).data('issue-id');
-        
-        if (action === 'unlink') {
-            if (confirm('{{ __("Are you sure you want to unlink this issue?") }}')) {
-                unlinkIssue(issueId);
-            }
-        } else if (action === 'refresh') {
-            refreshIssue(issueId);
-        }
-    });
-
-    // Search result selection
-    $(document).on('click', '.github-search-result-item', function() {
-        var issueNumber = $(this).data('issue-number');
-        $('#github-issue-number').val(issueNumber);
-        $('#github-search-results').hide();
-    });
-
-    // Helper functions
-    function loadRepositories() {
-        $.ajax({
-            url: '{{ route("github.repositories") }}',
-            type: 'GET',
-            success: function(response) {
-                if (response.status === 'success') {
-                    populateRepositorySelects(response.data);
-                }
-            }
-        });
-    }
-
-    function populateRepositorySelects(repositories) {
-        var selects = ['#github-repository', '#github-link-repository'];
-        
-        $.each(selects, function(i, selectId) {
-            var $select = $(selectId);
-            var currentValue = $select.val();
-            
-            $select.empty().append('<option value="">{{ __("Select Repository") }}</option>');
-            
-            $.each(repositories, function(i, repo) {
-                if (repo.has_issues) {
-                    var selected = repo.full_name === currentValue ? 'selected' : '';
-                    $select.append('<option value="' + repo.full_name + '" ' + selected + '>' + repo.full_name + '</option>');
-                }
-            });
-        });
-    }
-
-    function loadRepositoryLabels(repository) {
-        $.ajax({
-            url: '{{ route("github.labels", ":repository") }}'.replace(':repository', encodeURIComponent(repository)),
-            type: 'GET',
-            success: function(response) {
-                if (response.status === 'success') {
-                    populateLabelsSelect(response.data);
-                }
-            }
-        });
-    }
-
-    function populateLabelsSelect(labels) {
-        var $select = $('#github-issue-labels');
-        $select.empty();
-        
-        $.each(labels, function(i, label) {
-            $select.append('<option value="' + label.name + '">' + label.name + '</option>');
-        });
-    }
-
-    function searchGitHubIssues(repository, query) {
-        $.ajax({
-            url: '{{ route("github.search_issues") }}',
-            type: 'POST',
-            data: {
-                _token: '{{ csrf_token() }}',
-                repository: repository,
-                query: query,
-                per_page: 10
-            },
-            success: function(response) {
-                if (response.status === 'success') {
-                    displaySearchResults(response.data);
-                }
-            }
-        });
-    }
-
-    function displaySearchResults(issues) {
-        var $container = $('#github-search-results-list');
-        $container.empty();
-        
-        if (issues.length === 0) {
-            $container.html('<p class="text-muted">{{ __("No issues found") }}</p>');
-        } else {
-            $.each(issues, function(i, issue) {
-                var html = '<div class="github-search-result-item" data-issue-number="' + issue.number + '">' +
-                    '<div class="github-search-result-number">#' + issue.number + '</div>' +
-                    '<div class="github-search-result-title">' + issue.title + '</div>' +
-                    '<div class="github-search-result-meta">' +
-                        '<span class="badge badge-' + (issue.state === 'open' ? 'success' : 'secondary') + '">' + issue.state + '</span>' +
-                        ' • Updated ' + new Date(issue.updated_at).toLocaleDateString() +
-                    '</div>' +
-                '</div>';
-                $container.append(html);
-            });
-        }
-        
-        $('#github-search-results').show();
-    }
-
-    function generateIssueContent() {
-        // This would typically make an AJAX call to generate content
-        // For now, just populate with basic conversation info
-        if (!$('#github-issue-title').val()) {
-            $('#github-issue-title').val('{{ $conversation->subject }}');
-        }
-    }
-
-    function unlinkIssue(issueId) {
-        $.ajax({
-            url: '{{ route("github.unlink_issue") }}',
-            type: 'POST',
-            data: {
-                _token: '{{ csrf_token() }}',
-                conversation_id: '{{ $conversation->id }}',
-                issue_id: issueId
-            },
-            success: function(response) {
-                if (response.status === 'success') {
-                    showSuccessMessage(response.message);
-                    refreshGitHubIssues();
-                } else {
-                    showErrorMessage(response.message);
-                }
-            }
-        });
-    }
-
-    function refreshIssue(issueId) {
-        // Refresh single issue from GitHub
-        $('[data-issue-id="' + issueId + '"]').find('.fa-refresh').addClass('fa-spin');
-        
-        $.ajax({
-            url: '{{ route("github.issue_details", ":id") }}'.replace(':id', issueId),
-            type: 'GET',
-            success: function(response) {
-                if (response.status === 'success') {
-                    // Update the issue display
-                    refreshGitHubIssues();
-                }
-            },
-            complete: function() {
-                $('[data-issue-id="' + issueId + '"]').find('.fa-refresh').removeClass('fa-spin');
-            }
-        });
-    }
-
-    function refreshGitHubIssues() {
-        // Reload the entire sidebar
-        window.location.reload();
-    }
-
-    function showSuccessMessage(message) {
-        // Show success message (implement based on FreeScout's notification system)
-        console.log('Success:', message);
-    }
-
-    function showErrorMessage(message) {
-        // Show error message (implement based on FreeScout's notification system)
-        console.log('Error:', message);
-    }
-
-    function debounce(func, wait) {
-        let timeout;
-        return function executedFunction(...args) {
-            const later = () => {
-                clearTimeout(timeout);
-                func(...args);
-            };
-            clearTimeout(timeout);
-            timeout = setTimeout(later, wait);
-        };
-    }
-});
-</script>
 @endif

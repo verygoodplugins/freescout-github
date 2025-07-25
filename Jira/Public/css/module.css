@@ -1,0 +1,23 @@
+.jira-issuetype-icon {
+    position: relative;
+    top: -1px;
+}
+.jira-status-name {
+    text-transform: uppercase;
+    color: #93a1af;
+}
+.jira-sidebar a {
+	display: inline !important;
+}
+.jira-remove {
+	padding-left: 3px;
+	cursor: pointer;
+	position: relative;
+    top: 2px;
+    right: -5px;
+    color: #93a1af;
+    font-size: 11px;
+}
+.jira-remote-issues hr {
+    margin: 0 0 10px 0;
+}

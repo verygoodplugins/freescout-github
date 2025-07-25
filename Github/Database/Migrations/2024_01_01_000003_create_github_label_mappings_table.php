@@ -13,20 +13,22 @@ class CreateGithubLabelMappingsTable extends Migration
      */
     public function up()
     {
-        Schema::create('github_label_mappings', function (Blueprint $table) {
-            $table->id();
-            $table->string('freescout_tag');
-            $table->string('github_label');
-            $table->string('repository'); // owner/repo format
-            $table->decimal('confidence_threshold', 3, 2)->default(0.80); // 0.00 to 1.00
-            $table->timestamps();
-            
-            // Unique constraint to prevent duplicate mappings
-            $table->unique(['freescout_tag', 'repository']);
-            
-            // Index for faster lookups
-            $table->index(['repository', 'freescout_tag']);
-        });
+        if (!Schema::hasTable('github_label_mappings')) {
+            Schema::create('github_label_mappings', function (Blueprint $table) {
+                $table->increments('id');
+                $table->string('freescout_tag');
+                $table->string('github_label');
+                $table->string('repository'); // owner/repo format
+                $table->decimal('confidence_threshold', 3, 2)->default(0.80); // 0.00 to 1.00
+                $table->timestamps();
+                
+                // Unique constraint to prevent duplicate mappings
+                $table->unique(['freescout_tag', 'repository']);
+                
+                // Index for faster lookups
+                $table->index(['repository', 'freescout_tag']);
+            });
+        }
     }
 
     /**

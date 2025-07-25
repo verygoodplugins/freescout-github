@@ -196,6 +196,28 @@
     margin-top: 4px;
 }
 
+/* Fix modal backdrop z-index issues */
+.modal-backdrop {
+    z-index: 1040 !important;
+}
+
+.modal {
+    z-index: 1050 !important;
+}
+
+.modal-dialog {
+    z-index: 1060 !important;
+}
+
+/* Ensure connection status modal is properly layered */
+#connection-status-modal {
+    z-index: 1070 !important;
+}
+
+#connection-status-modal .modal-backdrop {
+    z-index: 1065 !important;
+}
+
 /* Search Results */
 .github-search-results {
     max-height: 250px;
