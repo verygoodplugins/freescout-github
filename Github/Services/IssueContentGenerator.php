@@ -3,7 +3,6 @@
 namespace Modules\Github\Services;
 
 use App\Conversation;
-use App\Thread;
 
 class IssueContentGenerator
 {
@@ -12,10 +11,10 @@ class IssueContentGenerator
      */
     public function generateContent(Conversation $conversation)
     {
-        $aiService = \Option::get('github.ai_service', 'openai');
+        $aiService = \Option::get('github.ai_service');
         $aiApiKey = \Option::get('github.ai_api_key');
 
-        if (!$aiApiKey) {
+        if (!$aiApiKey || empty($aiService)) {
             // Fallback to manual content generation
             return $this->generateManualContent($conversation);
         }
@@ -40,15 +39,24 @@ class IssueContentGenerator
      */
     private function generateWithOpenAI(Conversation $conversation, $apiKey)
     {
+        
         $conversationText = $this->extractConversationText($conversation);
         
         $prompt = $this->buildPrompt($conversationText, $conversation);
+
+        // Determine SSL settings based on environment
+        $isLocalDev = in_array(config('app.env'), ['local', 'dev', 'development']) || 
+                      strpos(config('app.url'), '.local') !== false ||
+                      strpos(config('app.url'), 'localhost') !== false;
 
         $curl = curl_init();
         curl_setopt_array($curl, [
             CURLOPT_URL => 'https://api.openai.com/v1/chat/completions',
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 30,
+            CURLOPT_SSL_VERIFYPEER => !$isLocalDev,
+            CURLOPT_SSL_VERIFYHOST => $isLocalDev ? 0 : 2,
+            CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_HTTPHEADER => [
                 'Authorization: Bearer ' . $apiKey,
                 'Content-Type: application/json'
@@ -73,12 +81,19 @@ class IssueContentGenerator
 
         $response = curl_exec($curl);
         $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+        $error = curl_error($curl);
+        $errno = curl_errno($curl);
+        $info = curl_getinfo($curl);
         curl_close($curl);
+
 
         if ($httpCode === 200) {
             $data = json_decode($response, true);
+            
             if (isset($data['choices'][0]['message']['content'])) {
-                $content = json_decode($data['choices'][0]['message']['content'], true);
+                $contentString = $data['choices'][0]['message']['content'];
+                
+                $content = json_decode($contentString, true);
                 if ($content && isset($content['title'], $content['body'])) {
                     return $content;
                 }
@@ -98,11 +113,19 @@ class IssueContentGenerator
         
         $prompt = $this->buildPrompt($conversationText, $conversation);
 
+        // Determine SSL settings based on environment  
+        $isLocalDev = in_array(config('app.env'), ['local', 'dev', 'development']) || 
+                      strpos(config('app.url'), '.local') !== false ||
+                      strpos(config('app.url'), 'localhost') !== false;
+
         $curl = curl_init();
         curl_setopt_array($curl, [
             CURLOPT_URL => 'https://api.anthropic.com/v1/messages',
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 30,
+            CURLOPT_SSL_VERIFYPEER => !$isLocalDev,
+            CURLOPT_SSL_VERIFYHOST => $isLocalDev ? 0 : 2,
+            CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_HTTPHEADER => [
                 'x-api-key: ' . $apiKey,
                 'Content-Type: application/json',
@@ -145,37 +168,132 @@ class IssueContentGenerator
     private function generateManualContent(Conversation $conversation)
     {
         $subject = $conversation->subject;
-        $firstThread = $conversation->threads()->orderBy('created_at')->first();
         
-        // Extract first customer message
+        // Get all customer messages for better context
+        $threads = $conversation->threads()
+            ->whereIn('type', [\App\Thread::TYPE_CUSTOMER, \App\Thread::TYPE_MESSAGE])
+            ->orderBy('created_at')
+            ->limit(5)
+            ->get();
+        
+        // Extract conversation summary
+        $conversationSummary = $this->extractConversationSummary($threads);
+        $technicalDetails = $this->extractTechnicalDetails($threads);
         $customerMessage = '';
-        if ($firstThread && $firstThread->type === Thread::TYPE_CUSTOMER) {
-            $customerMessage = strip_tags($firstThread->body);
-            $customerMessage = strlen($customerMessage) > 500 ? 
-                substr($customerMessage, 0, 500) . '...' : 
+        
+        $firstCustomerThread = $threads->where('type', \App\Thread::TYPE_CUSTOMER)->first();
+        if ($firstCustomerThread) {
+            $customerMessage = strip_tags($firstCustomerThread->body);
+            $customerMessage = strlen($customerMessage) > 800 ? 
+                substr($customerMessage, 0, 800) . '...' : 
                 $customerMessage;
+        }
+
+        // Get customer info safely
+        $customerName = 'Unknown Customer';
+        $customerEmail = 'No email';
+        if ($conversation->customer) {
+            $customerName = $conversation->customer->getFullName() ?: 'Unknown Customer';
+            $customerEmail = $conversation->customer->email ?: 'No email';
         }
 
         // Generate title
         $title = $subject;
         if (empty($title)) {
-            $title = 'Support Request from ' . $conversation->customer->getFullName();
+            $title = 'Support Request from ' . $customerName;
         }
 
-        // Generate body
-        $body = "## Support Request\n\n";
-        $body .= "**Customer:** " . $conversation->customer->getFullName() . "\n";
-        $body .= "**Email:** " . $conversation->customer->email . "\n";
-        $body .= "**Subject:** " . $subject . "\n\n";
+        // Check for custom manual template
+        $customTemplate = \Option::get('github.manual_template');
         
-        if ($customerMessage) {
-            $body .= "**Original Message:**\n";
-            $body .= $customerMessage . "\n\n";
-        }
+        if (!empty($customTemplate)) {
+            // Prepare conversation summary with fallback text
+            $summaryText = $conversationSummary;
+            if (!$summaryText) {
+                $aiService = \Option::get('github.ai_service');
+                $aiApiKey = \Option::get('github.ai_api_key');
+                
+                if (empty($aiService) || empty($aiApiKey)) {
+                    $summaryText = "_No AI service configured. To get intelligent summaries, configure OpenAI or Claude API in GitHub module settings._";
+                } else {
+                    $summaryText = "_AI summary generation failed. Using manual template._";
+                }
+            }
+            
+            // Use custom template with variable replacement
+            $body = str_replace([
+                '{customer_name}',
+                '{customer_email}',
+                '{subject}',
+                '{conversation_url}',
+                '{status}',
+                '{created_at}',
+                '{customer_message}',
+                '{conversation_summary}',
+                '{technical_details}',
+                '{thread_count}'
+            ], [
+                $customerName,
+                $customerEmail,
+                $subject,
+                url("/conversation/" . $conversation->id),
+                ucfirst($conversation->getStatusName()),
+                $conversation->created_at->format('Y-m-d H:i:s'),
+                $customerMessage ?: 'No customer message available',
+                $summaryText,
+                $technicalDetails ?: 'No technical details found',
+                $threads->count()
+            ], $customTemplate);
+        } else {
+            // Default template generation
+            $body = "## Summary\n\n";
+            if ($conversationSummary) {
+                $body .= $conversationSummary . "\n\n";
+            } else {
+                // Check if AI service is configured
+                $aiService = \Option::get('github.ai_service');
+                $aiApiKey = \Option::get('github.ai_api_key');
+                
+                if (empty($aiService) || empty($aiApiKey)) {
+                    $body .= "_No AI service configured. To get intelligent summaries, configure OpenAI or Claude API in GitHub module settings._\n\n";
+                } else {
+                    $body .= "_AI summary generation failed. Using manual template._\n\n";
+                }
+            }
+            
+            $body .= "## Customer Information\n\n";
+            $body .= "- **Name:** " . $customerName . "\n";
+            $body .= "- **Email:** " . $customerEmail . "\n";
+            $body .= "- **Subject:** " . $subject . "\n\n";
+            
+            if ($technicalDetails) {
+                $body .= "## Technical Details\n\n";
+                $body .= $technicalDetails . "\n\n";
+            }
+            
+            if ($customerMessage) {
+                $body .= "## Original Message\n\n";
+                $body .= "```\n" . $customerMessage . "\n```\n\n";
+            }
+            
+            // Add conversation thread summary
+            if ($threads->count() > 1) {
+                $body .= "## Conversation History\n\n";
+                foreach ($threads->take(3) as $thread) {
+                    $sender = $thread->type === \App\Thread::TYPE_CUSTOMER ? '👤 Customer' : '🏢 Support';
+                    $preview = strip_tags($thread->body);
+                    $preview = strlen($preview) > 200 ? substr($preview, 0, 200) . '...' : $preview;
+                    $body .= "**{$sender}** (" . $thread->created_at->format('M d, H:i') . "):\n";
+                    $body .= "> " . str_replace("\n", "\n> ", $preview) . "\n\n";
+                }
+            }
 
-        $body .= "**FreeScout Conversation:** " . \Helper::getAppUrl() . "/conversation/" . $conversation->id . "\n";
-        $body .= "**Status:** " . ucfirst($conversation->getStatusName()) . "\n";
-        $body .= "**Created:** " . $conversation->created_at->format('Y-m-d H:i:s') . "\n";
+            $body .= "## Metadata\n\n";
+            $body .= "- **FreeScout URL:** " . url("/conversation/" . $conversation->id) . "\n";
+            $body .= "- **Status:** " . ucfirst($conversation->getStatusName()) . "\n";
+            $body .= "- **Created:** " . $conversation->created_at->format('Y-m-d H:i:s') . "\n";
+            $body .= "- **Messages:** " . $threads->count() . "\n";
+        }
 
         return [
             'title' => $title,
@@ -189,20 +307,22 @@ class IssueContentGenerator
     private function extractConversationText(Conversation $conversation)
     {
         $threads = $conversation->threads()
-            ->whereIn('type', [Thread::TYPE_CUSTOMER, Thread::TYPE_MESSAGE])
+            ->whereIn('type', [\App\Thread::TYPE_CUSTOMER, \App\Thread::TYPE_MESSAGE])
             ->orderBy('created_at')
             ->limit(10) // Limit to first 10 messages to avoid token limits
             ->get();
 
+
         $text = "Subject: " . $conversation->subject . "\n\n";
         
         foreach ($threads as $thread) {
-            $sender = $thread->type === Thread::TYPE_CUSTOMER ? 'Customer' : 'Support';
+            $sender = $thread->type === \App\Thread::TYPE_CUSTOMER ? 'Customer' : 'Support';
             $body = strip_tags($thread->body);
             $body = strlen($body) > 300 ? substr($body, 0, 300) . '...' : $body;
             
             $text .= "[$sender]: $body\n\n";
         }
+
 
         return $text;
     }
@@ -212,14 +332,34 @@ class IssueContentGenerator
      */
     private function buildPrompt($conversationText, Conversation $conversation)
     {
-        $customerName = $conversation->customer->getFullName();
-        $conversationUrl = \Helper::getAppUrl() . "/conversation/" . $conversation->id;
-
+        $customerName = $conversation->customer ? $conversation->customer->getFullName() : 'Unknown Customer';
+        $conversationUrl = url("/conversation/" . $conversation->id);
+        $status = ucfirst($conversation->getStatusName());
+        
+        // Check for custom AI prompt template
+        $customPrompt = \Option::get('github.ai_prompt_template');
+        
+        if (!empty($customPrompt)) {
+            // Use custom template with variable replacement
+            return str_replace([
+                '{customer_name}',
+                '{conversation_url}',
+                '{status}',
+                '{conversation_text}'
+            ], [
+                $customerName,
+                $conversationUrl,
+                $status,
+                $conversationText
+            ], $customPrompt);
+        }
+        
+        // Default prompt template
         return "Create a GitHub issue from this customer support conversation.
 
 Customer: $customerName
 FreeScout URL: $conversationUrl
-Status: " . ucfirst($conversation->getStatusName()) . "
+Status: $status
 
 Conversation:
 $conversationText
@@ -240,5 +380,58 @@ Respond with valid JSON in this format:
   \"title\": \"Issue title here\",
   \"body\": \"Issue body with markdown formatting\"
 }";
+    }
+
+    /**
+     * Extract a summary from conversation threads
+     */
+    private function extractConversationSummary($threads)
+    {
+        // Without AI, we can't generate a true summary
+        // This would be replaced by AI analysis
+        return null;
+    }
+
+    /**
+     * Extract technical details from conversation
+     */
+    private function extractTechnicalDetails($threads)
+    {
+        $technicalKeywords = [
+            'error', 'bug', 'issue', 'problem', 'crash', 'fail', 'exception',
+            'version', 'PHP', 'WordPress', 'plugin', 'theme', 'database',
+            'API', 'integration', 'webhook', 'timeout', '404', '500', 'status code'
+        ];
+        
+        $details = [];
+        
+        foreach ($threads as $thread) {
+            $body = strtolower(strip_tags($thread->body));
+            
+            // Look for version numbers
+            if (preg_match_all('/(?:version|v)?\s*(\d+\.\d+(?:\.\d+)?)/i', $body, $matches)) {
+                foreach ($matches[1] as $version) {
+                    $details[] = "Version mentioned: " . $version;
+                }
+            }
+            
+            // Look for error messages
+            if (preg_match_all('/(?:error|exception):\s*([^\n.]+)/i', $body, $matches)) {
+                foreach ($matches[1] as $error) {
+                    $details[] = "Error: " . trim($error);
+                }
+            }
+            
+            // Look for URLs
+            if (preg_match_all('/(https?:\/\/[^\s]+)/i', $body, $matches)) {
+                foreach ($matches[1] as $url) {
+                    if (!strpos($url, 'freescout')) {
+                        $details[] = "URL mentioned: " . $url;
+                    }
+                }
+            }
+        }
+        
+        return $details ? implode("\n", array_unique($details)) : null;
     }
 }

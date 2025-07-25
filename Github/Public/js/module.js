@@ -122,8 +122,8 @@ function githubInitModals() {
             setTimeout(function() {
                 githubSetDefaultRepository('#github-repository');
                 
-                // Auto-generate content if AI is enabled and auto-generate is checked
-                if ($('#github-auto-generate').is(':checked')) {
+                // Auto-generate content if fields are empty
+                if (!$('#github-issue-title').val() && !$('#github-issue-body').val()) {
                     githubGenerateIssueContent();
                 }
             }, 100);
@@ -160,12 +160,6 @@ function githubInitModals() {
             }
         });
 
-        // Auto-generate toggle
-        $(document).on('change', '#github-auto-generate', function() {
-            if ($(this).is(':checked')) {
-                githubGenerateIssueContent();
-            }
-        });
         
         // Manual generate content button
         $(document).on('click', '#github-generate-content-btn', function(e) {
@@ -218,12 +212,12 @@ function githubInitModals() {
                         $('#github-create-issue-modal').modal('hide');
                         window.location.href = '';
                     } else {
-                        showAjaxError(response);
+                        githubShowAjaxError(response);
                     }
                 }, true,
-                function(response) {
-                    showFloatingAlert('error', Lang.get("messages.ajax_error"));
-                    ajaxFinish();
+                function(xhr) {
+                    button.button('reset');
+                    githubShowAjaxError(xhr.responseJSON || {message: Lang.get("messages.ajax_error")});
                 }, {
                     cache: false,
                     contentType: false,
@@ -254,12 +248,12 @@ function githubInitModals() {
                         $('#github-link-issue-modal').modal('hide');
                         window.location.href = '';
                     } else {
-                        showAjaxError(response);
+                        githubShowAjaxError(response);
                     }
                 }, true,
-                function(response) {
-                    showFloatingAlert('error', Lang.get("messages.ajax_error"));
-                    ajaxFinish();
+                function(xhr) {
+                    button.button('reset');
+                    githubShowAjaxError(xhr.responseJSON || {message: Lang.get("messages.ajax_error")});
                 }, {
                     cache: false,
                     contentType: false,
@@ -276,7 +270,7 @@ function githubLoadRepositories() {
     
     // Show loading indicator
     $loadingDiv.show();
-    $refreshBtn.find('.fa').addClass('fa-spin');
+    $refreshBtn.find('.glyphicon').addClass('glyphicon-spin');
     
     fsAjax({}, 
     laroute.route('github.repositories'), 
@@ -295,11 +289,11 @@ function githubLoadRepositories() {
             showFloatingAlert('error', 'Failed to load repositories: ' + (response.message || 'Unknown error'));
         }
         $loadingDiv.hide();
-        $refreshBtn.find('.fa').removeClass('fa-spin');
+        $refreshBtn.find('.glyphicon').removeClass('glyphicon-spin');
     }, true, function() {
         // Error callback
         $loadingDiv.hide();
-        $refreshBtn.find('.fa').removeClass('fa-spin');
+        $refreshBtn.find('.glyphicon').removeClass('glyphicon-spin');
         showFloatingAlert('error', 'Failed to load repositories');
     });
 }
@@ -414,8 +408,11 @@ function githubPopulateRepositories(repositories) {
 }
 
 function githubLoadRepositoryLabels(repository) {
+    // Use laroute to generate URL with encoded parameter
+    var url = laroute.route('github.labels', { repository: repository });
+    
     $.ajax({
-        url: '/github/labels/' + encodeURIComponent(repository),
+        url: url,
         type: 'GET',
         success: function(response) {
             if (response.status === 'success') {
@@ -476,7 +473,7 @@ function githubAddLabelMappingRow(mapping) {
         '<input type="text" class="form-control" name="github_label" placeholder="GitHub Label" value="' + (mapping.github_label || '') + '">' +
         '<input type="number" class="form-control" name="confidence_threshold" placeholder="0.80" value="' + (mapping.confidence_threshold || 0.80) + '" min="0" max="1" step="0.01">' +
         '<button type="button" class="btn btn-danger btn-sm remove-mapping">' +
-            '<i class="fa fa-trash"></i>' +
+            '<i class="glyphicon glyphicon-trash"></i>' +
         '</button>' +
     '</div>';
 
@@ -524,20 +521,27 @@ function githubDisplaySearchResults(issues) {
 function githubGenerateIssueContent() {
     var conversationId = $('#github-create-issue-form input[name="conversation_id"]').val();
     
+    // Fallback to global conversation ID if not found in form
+    if (!conversationId) {
+        conversationId = getGlobalAttr('conversation_id');
+    }
+    
     if (!conversationId) {
         showFloatingAlert('error', 'No conversation ID found');
+        console.error('GitHub: Could not find conversation ID in form or global attributes');
         return;
     }
+    
     
     // Show loading state
     var $titleField = $('#github-issue-title');
     var $bodyField = $('#github-issue-body');
     var $generateBtn = $('#github-generate-content-btn');
     
-    $generateBtn.prop('disabled', true).find('i').removeClass('fa-magic').addClass('fa-spinner fa-spin');
+    $generateBtn.prop('disabled', true).find('i').removeClass('glyphicon-flash').addClass('glyphicon-refresh glyphicon-spin');
     
     $.ajax({
-        url: '/github/generate-content',
+        url: laroute.route('github.generate_content'),
         type: 'POST',
         data: {
             conversation_id: conversationId,
@@ -557,18 +561,66 @@ function githubGenerateIssueContent() {
             }
         },
         error: function(xhr) {
+            console.error('GitHub: Generate content error:', xhr);
             var response = xhr.responseJSON || {};
             var errorMessage = response.message || 'Failed to generate content';
+            
+            // Add more detailed error info for debugging
+            if (xhr.status === 500 && !response.message) {
+                errorMessage = 'Server error occurred. Check server logs for details.';
+            } else if (xhr.status === 422 && response.errors) {
+                var errors = [];
+                for (var field in response.errors) {
+                    errors = errors.concat(response.errors[field]);
+                }
+                errorMessage = errors.join(', ');
+            }
+            
             showFloatingAlert('error', errorMessage);
         },
         complete: function() {
-            $generateBtn.prop('disabled', false).find('i').removeClass('fa-spinner fa-spin').addClass('fa-magic');
+            $generateBtn.prop('disabled', false).find('i').removeClass('glyphicon-refresh glyphicon-spin').addClass('glyphicon-flash');
         }
     });
 }
 
 function githubFormatDate(dateString) {
     return new Date(dateString).toLocaleDateString();
+}
+
+function githubShowAjaxError(response) {
+    var errorMessage = 'An error occurred';
+    
+    if (response.message) {
+        errorMessage = response.message;
+        
+        // If there are validation errors, append them
+        if (response.errors) {
+            var errorDetails = [];
+            for (var field in response.errors) {
+                if (response.errors.hasOwnProperty(field)) {
+                    var fieldErrors = response.errors[field];
+                    if (Array.isArray(fieldErrors)) {
+                        errorDetails = errorDetails.concat(fieldErrors);
+                    }
+                }
+            }
+            if (errorDetails.length > 0) {
+                errorMessage += ':\n• ' + errorDetails.join('\n• ');
+            }
+        }
+    } else if (response.errors) {
+        // Handle case where there's no main message but there are errors
+        var errors = [];
+        for (var field in response.errors) {
+            if (response.errors.hasOwnProperty(field)) {
+                errors = errors.concat(response.errors[field]);
+            }
+        }
+        errorMessage = errors.length > 0 ? errors.join('\n') : 'Validation failed';
+    }
+    
+    showFloatingAlert('error', errorMessage);
 }
 
 function githubShowConnectionResult(response) {
@@ -662,7 +714,7 @@ function githubCreateIssue() {
         var $btn = $(this);
         
         $btn.prop('disabled', true);
-        $btn.find('.fa').removeClass('fa-plus').addClass('fa-spinner fa-spin');
+        $btn.find('.glyphicon').removeClass('glyphicon-plus').addClass('glyphicon-refresh glyphicon-spin');
         
         $.ajax({
             url: laroute.route('github.create_issue'),
@@ -706,7 +758,7 @@ function githubCreateIssue() {
             },
             complete: function() {
                 $btn.prop('disabled', false);
-                $btn.find('.fa').removeClass('fa-spinner fa-spin').addClass('fa-plus');
+                $btn.find('.glyphicon').removeClass('glyphicon-refresh glyphicon-spin').addClass('glyphicon-plus');
             }
         });
     });
@@ -718,7 +770,7 @@ function githubLinkIssue() {
         var $btn = $(this);
         
         $btn.prop('disabled', true);
-        $btn.find('.fa').removeClass('fa-link').addClass('fa-spinner fa-spin');
+        $btn.find('.glyphicon').removeClass('glyphicon-link').addClass('glyphicon-refresh glyphicon-spin');
         
         $.ajax({
             url: laroute.route('github.link_issue'),
@@ -762,7 +814,7 @@ function githubLinkIssue() {
             },
             complete: function() {
                 $btn.prop('disabled', false);
-                $btn.find('.fa').removeClass('fa-spinner fa-spin').addClass('fa-link');
+                $btn.find('.glyphicon').removeClass('glyphicon-refresh glyphicon-spin').addClass('glyphicon-link');
             }
         });
     });
@@ -819,18 +871,23 @@ function githubUnlinkIssue(issueId) {
 }
 
 function githubRefreshIssue(issueId) {
-    $('[data-issue-id="' + issueId + '"]').find('.fa-refresh').addClass('fa-spin');
+    $('[data-issue-id="' + issueId + '"]').find('.glyphicon-refresh').addClass('glyphicon-spin');
+    
+    var url = laroute.route('github.issue_details', {id: issueId});
     
     $.ajax({
-        url: laroute.route('github.issue_details', issueId),
+        url: url,
         type: 'GET',
         success: function(response) {
             if (response.status === 'success') {
                 window.location.reload();
             }
         },
+        error: function(xhr, status, error) {
+            showFloatingAlert('error', 'Failed to refresh issue: ' + error);
+        },
         complete: function() {
-            $('[data-issue-id="' + issueId + '"]').find('.fa-refresh').removeClass('fa-spin');
+            $('[data-issue-id="' + issueId + '"]').find('.glyphicon-refresh').removeClass('glyphicon-spin');
         }
     });
 }

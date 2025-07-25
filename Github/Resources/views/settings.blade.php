@@ -29,7 +29,7 @@
             </div>
             <div class="col-sm-2">
                 <button type="button" class="btn btn-default" id="test-connection">
-                    <i class="fa fa-check-circle"></i> {{ __('Test Connection') }}
+                    <i class="glyphicon glyphicon-ok"></i> {{ __('Test Connection') }}
                 </button>
             </div>
         </div>
@@ -51,12 +51,12 @@
                     {{ __('Default repository for creating issues') }}
                 </p>
                 <div id="github-repositories-loading" class="text-muted" style="display: none;">
-                    <i class="fa fa-spinner fa-spin"></i> {{ __('Loading repositories...') }}
+                    <i class="glyphicon glyphicon-refresh glyphicon-spin"></i> {{ __('Loading repositories...') }}
                 </div>
             </div>
             <div class="col-sm-2">
                 <button type="button" class="btn btn-default" id="refresh-repositories">
-                    <i class="fa fa-refresh"></i> {{ __('Refresh') }}
+                    <i class="glyphicon glyphicon-refresh"></i> {{ __('Refresh') }}
                 </button>
             </div>
         </div>
@@ -107,6 +107,125 @@
                 @include('partials/field_error', ['field'=>'github.ai_api_key'])
                 <p class="form-help">
                     {{ __('API key for the selected AI service (OpenAI or Claude)') }}
+                </p>
+            </div>
+        </div>
+
+        <!-- Issue Template Configuration -->
+        <div class="form-group">
+            <label class="col-sm-2 control-label">{{ __('AI Prompt Template') }}</label>
+            <div class="col-sm-10">
+                <textarea class="form-control" name="settings[github.ai_prompt_template]" rows="12" placeholder="Create a GitHub issue from this customer support conversation.
+
+Customer: {customer_name}
+FreeScout URL: {conversation_url}
+Status: {status}
+
+Conversation:
+{conversation_text}
+
+Requirements:
+1. Create a clear, professional issue title (max 80 characters)
+2. Create a detailed issue body with:
+   - Brief problem summary
+   - Customer details (name, email)
+   - Original message context
+   - Link back to FreeScout conversation
+   - Any technical details mentioned
+3. Use proper GitHub markdown formatting
+4. Be professional and technical in tone
+
+Respond with valid JSON in this format:
+{
+  &quot;title&quot;: &quot;Issue title here&quot;,
+  &quot;body&quot;: &quot;Issue body with markdown formatting&quot;
+}">{{ old('settings.github.ai_prompt_template', \Option::get('github.ai_prompt_template', 'Create a GitHub issue from this customer support conversation.
+
+Customer: {customer_name}
+FreeScout URL: {conversation_url}
+Status: {status}
+
+Conversation:
+{conversation_text}
+
+Requirements:
+1. Create a clear, professional issue title (max 80 characters)
+2. Create a detailed issue body with:
+   - Brief problem summary
+   - Customer details (name, email)
+   - Original message context
+   - Link back to FreeScout conversation
+   - Any technical details mentioned
+3. Use proper GitHub markdown formatting
+4. Be professional and technical in tone
+
+Respond with valid JSON in this format:
+{
+  "title": "Issue title here",
+  "body": "Issue body with markdown formatting"
+}')) }}</textarea>
+                <p class="form-help">
+                    {{ __('Custom prompt template for AI issue generation. Available variables: {customer_name}, {conversation_url}, {status}, {conversation_text}') }}
+                </p>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label class="col-sm-2 control-label">{{ __('Manual Template') }}</label>
+            <div class="col-sm-10">
+                <textarea class="form-control" name="settings[github.manual_template]" rows="15" placeholder="## Summary
+
+{conversation_summary}
+
+## Customer Information
+
+- **Name:** {customer_name}
+- **Email:** {customer_email}
+- **Subject:** {subject}
+
+## Technical Details
+
+{technical_details}
+
+## Original Message
+
+```
+{customer_message}
+```
+
+## Metadata
+
+- **FreeScout URL:** {conversation_url}
+- **Status:** {status}
+- **Created:** {created_at}
+- **Messages:** {thread_count}">{{ old('settings.github.manual_template', \Option::get('github.manual_template', '## Summary
+
+{conversation_summary}
+
+## Customer Information
+
+- **Name:** {customer_name}
+- **Email:** {customer_email}
+- **Subject:** {subject}
+
+## Technical Details
+
+{technical_details}
+
+## Original Message
+
+```
+{customer_message}
+```
+
+## Metadata
+
+- **FreeScout URL:** {conversation_url}
+- **Status:** {status}
+- **Created:** {created_at}
+- **Messages:** {thread_count}')) }}</textarea>
+                <p class="form-help">
+                    {{ __('Template for manual issue generation (when AI is not available). Available variables: {customer_name}, {customer_email}, {subject}, {conversation_url}, {status}, {created_at}, {customer_message}, {conversation_summary}, {technical_details}, {thread_count}') }}
                 </p>
             </div>
         </div>
@@ -169,7 +288,7 @@
                             <p class="text-muted">{{ __('Select a repository to configure label mappings') }}</p>
                         </div>
                         <button type="button" class="btn btn-default btn-sm" id="add-label-mapping">
-                            <i class="fa fa-plus"></i> {{ __('Add Mapping') }}
+                            <i class="glyphicon glyphicon-plus"></i> {{ __('Add Mapping') }}
                         </button>
                     </div>
                 </div>

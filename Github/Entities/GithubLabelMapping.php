@@ -83,7 +83,7 @@ class GithubLabelMapping extends Model
         $matches = [];
 
         foreach ($mappings as $mapping) {
-            $similarity = $this->calculateSimilarity($freescout_tag, $mapping->freescout_tag);
+            $similarity = self::calculateSimilarity($freescout_tag, $mapping->freescout_tag);
             if ($similarity >= $similarity_threshold) {
                 $matches[] = [
                     'mapping' => $mapping,
@@ -103,7 +103,7 @@ class GithubLabelMapping extends Model
     /**
      * Calculate string similarity
      */
-    private function calculateSimilarity($str1, $str2)
+    private static function calculateSimilarity($str1, $str2)
     {
         return similar_text(strtolower($str1), strtolower($str2)) / max(strlen($str1), strlen($str2));
     }

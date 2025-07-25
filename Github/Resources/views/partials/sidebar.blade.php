@@ -2,15 +2,15 @@
 <div class="sidebar-block github-sidebar-block" data-default-repository="{{ \Option::get('github.default_repository') }}">
     <div class="sidebar-block-header">
         <h3>
-            <i class="fa fa-github"></i>
+            <i class="glyphicon glyphicon-folder-open"></i>
             {{ __('GitHub Issues') }}
         </h3>
         <div class="sidebar-block-header-actions">
             <a href="#" class="btn btn-default btn-xs" data-toggle="modal" data-target="#github-create-issue-modal" title="{{ __('Create Issue') }}">
-                <i class="fa fa-plus"></i>
+                <i class="glyphicon glyphicon-plus"></i>
             </a>
             <a href="#" class="btn btn-default btn-xs" data-toggle="modal" data-target="#github-link-issue-modal" title="{{ __('Link Issue') }}">
-                <i class="fa fa-link"></i>
+                <i class="glyphicon glyphicon-link"></i>
             </a>
         </div>
     </div>
@@ -31,17 +31,17 @@
                             </div>
                             <div class="github-issue-actions">
                                 <a href="#" class="github-issue-action" data-action="refresh" data-issue-id="{{ $issue->id }}" title="{{ __('Refresh') }}">
-                                    <i class="fa fa-refresh"></i>
+                                    <i class="glyphicon glyphicon-refresh"></i>
                                 </a>
                                 <a href="#" class="github-issue-action" data-action="unlink" data-issue-id="{{ $issue->id }}" title="{{ __('Unlink') }}">
-                                    <i class="fa fa-unlink"></i>
+                                    <i class="glyphicon glyphicon-remove"></i>
                                 </a>
                             </div>
                         </div>
                         
                         <div class="github-issue-details">
                             <div class="github-issue-repository">
-                                <i class="fa fa-folder"></i>
+                                <i class="glyphicon glyphicon-folder-close"></i>
                                 {{ $issue->getShortRepository() }}
                             </div>
                             
@@ -61,7 +61,7 @@
                             
                             @if($issue->assignees && count($issue->assignees) > 0)
                                 <div class="github-issue-assignees">
-                                    <i class="fa fa-user"></i>
+                                    <i class="glyphicon glyphicon-user"></i>
                                     {{ implode(', ', $issue->assignees) }}
                                 </div>
                             @endif
@@ -77,7 +77,7 @@
             @else
                 <div class="github-no-issues">
                     <div class="text-muted text-center">
-                        <i class="fa fa-github" style="font-size: 2em; margin-bottom: 10px;"></i>
+                        <i class="glyphicon glyphicon-folder-open" style="font-size: 2em; margin-bottom: 10px;"></i>
                         <p>{{ __('No GitHub issues linked to this conversation.') }}</p>
                         <p>
                             <a href="#" data-toggle="modal" data-target="#github-create-issue-modal" class="btn btn-sm btn-primary">
@@ -103,7 +103,7 @@
                     <span aria-hidden="true">&times;</span>
                 </button>
                 <h4 class="modal-title" id="github-create-issue-modal-title">
-                    <i class="fa fa-github"></i>
+                    <i class="glyphicon glyphicon-folder-open"></i>
                     {{ __('Create GitHub Issue') }}
                 </h4>
             </div>
@@ -130,7 +130,7 @@
                             <input type="text" class="form-control" name="title" id="github-issue-title" maxlength="255" required>
                             <div class="input-group-btn">
                                 <button type="button" class="btn btn-default" id="github-generate-content-btn" title="{{ __('Generate with AI') }}">
-                                    <i class="fa fa-magic"></i>
+                                    <i class="glyphicon glyphicon-flash"></i>
                                 </button>
                             </div>
                         </div>
@@ -158,29 +158,12 @@
                         </div>
                     </div>
                     
-                    <div class="form-group">
-                        <div class="checkbox">
-                            <label>
-                                <input type="checkbox" name="auto_generate_content" id="github-auto-generate" checked>
-                                {{ __('Auto-generate content from conversation') }}
-                            </label>
-                        </div>
-                    </div>
-                    
-                    <div class="form-group">
-                        <div class="checkbox">
-                            <label>
-                                <input type="checkbox" name="auto_assign_labels" id="github-auto-labels" checked>
-                                {{ __('Auto-assign labels based on conversation') }}
-                            </label>
-                        </div>
-                    </div>
                 </form>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-default" data-dismiss="modal">{{ __('Cancel') }}</button>
                 <button type="button" class="btn btn-primary" id="github-create-issue-btn">
-                    <i class="fa fa-plus"></i>
+                    <i class="glyphicon glyphicon-plus"></i>
                     {{ __('Create Issue') }}
                 </button>
             </div>
@@ -197,7 +180,7 @@
                     <span aria-hidden="true">&times;</span>
                 </button>
                 <h4 class="modal-title" id="github-link-issue-modal-title">
-                    <i class="fa fa-link"></i>
+                    <i class="glyphicon glyphicon-link"></i>
                     {{ __('Link GitHub Issue') }}
                 </h4>
             </div>
@@ -237,7 +220,7 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-default" data-dismiss="modal">{{ __('Cancel') }}</button>
                 <button type="button" class="btn btn-primary" id="github-link-issue-btn">
-                    <i class="fa fa-link"></i>
+                    <i class="glyphicon glyphicon-link"></i>
                     {{ __('Link Issue') }}
                 </button>
             </div>
@@ -379,6 +362,28 @@
 
 .badge-secondary {
     background-color: #6c757d;
+}
+
+.glyphicon-spin {
+    -webkit-animation: spin 1s infinite linear;
+    -moz-animation: spin 1s infinite linear;
+    -o-animation: spin 1s infinite linear;
+    animation: spin 1s infinite linear;
+}
+
+@-moz-keyframes spin {
+    from { -moz-transform: rotate(0deg); }
+    to { -moz-transform: rotate(360deg); }
+}
+
+@-webkit-keyframes spin {
+    from { -webkit-transform: rotate(0deg); }
+    to { -webkit-transform: rotate(360deg); }
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
 }
 </style>
 

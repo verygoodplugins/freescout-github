@@ -17,17 +17,23 @@ class LabelAssignmentService
 
         // Method 1: Try FreeScout tag mapping first
         $tagLabels = $this->mapFreeScoutTags($conversation, $availableLabels, $repository);
-        $assignedLabels = array_merge($assignedLabels, $tagLabels);
+        if (is_array($tagLabels)) {
+            $assignedLabels = array_merge($assignedLabels, $tagLabels);
+        }
 
         // Method 2: If no tags or insufficient mapping, use AI analysis
         if (empty($assignedLabels) && \Option::get('github.ai_enabled', true)) {
             $aiLabels = $this->analyzeConversationContent($conversation, $availableLabels);
-            $assignedLabels = array_merge($assignedLabels, $aiLabels);
+            if (is_array($aiLabels)) {
+                $assignedLabels = array_merge($assignedLabels, $aiLabels);
+            }
         }
 
         // Method 3: Apply default labels based on conversation properties
         $defaultLabels = $this->applyDefaultLabels($conversation, $availableLabels);
-        $assignedLabels = array_merge($assignedLabels, $defaultLabels);
+        if (is_array($defaultLabels)) {
+            $assignedLabels = array_merge($assignedLabels, $defaultLabels);
+        }
 
         // Remove duplicates and validate
         $assignedLabels = array_unique($assignedLabels);

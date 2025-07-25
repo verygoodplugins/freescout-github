@@ -4,7 +4,6 @@ namespace Modules\Github\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Response;
 use Modules\Github\Services\GithubApiClient;
 use Modules\Github\Services\IssueContentGenerator;
 use Modules\Github\Services\LabelAssignmentService;
@@ -56,17 +55,31 @@ class GithubController extends Controller
      */
     public function getRepositories(Request $request)
     {
-        $result = GithubApiClient::getRepositories();
-        
-        if ($result['status'] === 'success') {
-            return response()->json([
-                'status' => 'success',
-                'repositories' => $result['data']
-            ]);
-        } else {
+        try {
+            $result = GithubApiClient::getRepositories();
+            
+            \Helper::log('github_debug', 'Repository fetch result: ' . json_encode([
+                'status' => $result['status'],
+                'data_count' => isset($result['data']) ? count($result['data']) : 'no data',
+                'message' => $result['message'] ?? 'no message'
+            ]));
+            
+            if ($result['status'] === 'success') {
+                return response()->json([
+                    'status' => 'success',
+                    'repositories' => $result['data']
+                ]);
+            } else {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $result['message']
+                ]);
+            }
+        } catch (\Exception $e) {
+            \Helper::logException($e, '[GitHub] Get Repositories Error');
             return response()->json([
                 'status' => 'error',
-                'message' => $result['message']
+                'message' => 'Failed to fetch repositories: ' . $e->getMessage()
             ]);
         }
     }
@@ -112,17 +125,18 @@ class GithubController extends Controller
         ]);
 
         try {
-            $result = GithubApiClient::searchIssues(
-                $request->get('repository'),
-                $request->get('query', ''),
-                $request->get('state', 'open'),
-                $request->get('per_page', 20)
-            );
+            $repository = $request->get('repository');
+            $query = $request->get('query', '');
+            $state = $request->get('state', 'open');
+            $per_page = $request->get('per_page', 20);
+            
+            
+            $result = GithubApiClient::searchIssues($repository, $query, $state, $per_page);
 
             if ($result['status'] === 'success') {
                 return response()->json([
                     'status' => 'success',
-                    'data' => $result['data'] ?? $result['issues'] ?? []
+                    'issues' => $result['data'] ?? []
                 ]);
             } else {
                 return response()->json([
@@ -169,30 +183,36 @@ class GithubController extends Controller
             'title' => 'nullable|string|max:255',
             'body' => 'nullable|string',
             'labels' => 'nullable|array',
-            'assignees' => 'nullable|array',
-            'auto_generate_content' => 'nullable|boolean',
-            'auto_assign_labels' => 'nullable|boolean'
+            'assignees' => 'nullable|array'
         ]);
 
-        $conversation = Conversation::findOrFail($request->get('conversation_id'));
+        $conversation = \App\Conversation::with('customer')->findOrFail($request->get('conversation_id'));
         
         // Permission check
-        if (!$conversation->userCanUpdate()) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'You do not have permission to create issues for this conversation'
-            ], 403);
+        try {
+            if (method_exists($conversation, 'userCanUpdate') && !$conversation->userCanUpdate()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'You do not have permission to create issues for this conversation'
+                ], 403);
+            }
+        } catch (\Exception $e) {
+            \Helper::logException($e, '[GitHub] Permission Check Error');
         }
 
         $repository = $request->get('repository');
         $title = $request->get('title');
         $body = $request->get('body');
-        $labels = $request->get('labels', []);
-        $assignees = $request->get('assignees', []);
+        $labels = $request->get('labels', []) ?: [];
+        $assignees = $request->get('assignees', []) ?: [];
 
         try {
-            // Auto-generate content if requested
-            if ($request->get('auto_generate_content', false) && (empty($title) || empty($body))) {
+            // Check global settings for auto-generation
+            $aiEnabled = !empty(\Option::get('github.ai_service')) && !empty(\Option::get('github.ai_api_key'));
+            $autoAssignLabels = \Option::get('github.auto_assign_labels', false);
+            
+            // Auto-generate content if AI is enabled and fields are empty
+            if ($aiEnabled && (empty($title) || empty($body))) {
                 $contentGenerator = new IssueContentGenerator();
                 $generatedContent = $contentGenerator->generateContent($conversation);
                 
@@ -201,13 +221,15 @@ class GithubController extends Controller
             }
 
             // Auto-assign labels if requested
-            if ($request->get('auto_assign_labels', false) && empty($labels)) {
+            if ($autoAssignLabels && empty($labels)) {
                 $labelService = new LabelAssignmentService();
                 $repositoryLabels = GithubApiClient::getLabels($repository);
                 
                 if ($repositoryLabels['status'] === 'success') {
                     $assignedLabels = $labelService->assignLabels($conversation, $repositoryLabels['data']);
-                    $labels = array_merge($labels, $assignedLabels);
+                    if (is_array($assignedLabels)) {
+                        $labels = array_merge($labels, $assignedLabels);
+                    }
                 }
             }
 
@@ -220,10 +242,7 @@ class GithubController extends Controller
                 $issue->linkToConversation($conversation->id);
 
                 // Add system note to conversation
-                \App\Thread::create([
-                    'conversation_id' => $conversation->id,
-                    'type' => \App\Thread::TYPE_NOTE,
-                    'body' => "GitHub issue created: <a href=\"{$result['data']['html_url']}\" target=\"_blank\">#{$result['data']['number']} {$result['data']['title']}</a>",
+                \App\Thread::create($conversation, \App\Thread::TYPE_NOTE, "GitHub issue created: <a href=\"{$result['data']['html_url']}\" target=\"_blank\">#{$result['data']['number']} {$result['data']['title']}</a>", [
                     'created_by_user_id' => auth()->id(),
                     'source_via' => \App\Thread::PERSON_USER
                 ]);
@@ -259,14 +278,18 @@ class GithubController extends Controller
             'issue_number' => 'required|integer'
         ]);
 
-        $conversation = Conversation::findOrFail($request->get('conversation_id'));
+        $conversation = \App\Conversation::with('customer')->findOrFail($request->get('conversation_id'));
         
         // Permission check
-        if (!$conversation->userCanUpdate()) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'You do not have permission to link issues to this conversation'
-            ], 403);
+        try {
+            if (method_exists($conversation, 'userCanUpdate') && !$conversation->userCanUpdate()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'You do not have permission to link issues to this conversation'
+                ], 403);
+            }
+        } catch (\Exception $e) {
+            \Helper::logException($e, '[GitHub] Permission Check Error');
         }
 
         $repository = $request->get('repository');
@@ -285,10 +308,7 @@ class GithubController extends Controller
 
                 if ($linked) {
                     // Add system note to conversation
-                    \App\Thread::create([
-                        'conversation_id' => $conversation->id,
-                        'type' => \App\Thread::TYPE_NOTE,
-                        'body' => "GitHub issue linked: <a href=\"{$issue->html_url}\" target=\"_blank\">#{$issue->number} {$issue->title}</a>",
+                    \App\Thread::create($conversation, \App\Thread::TYPE_NOTE, "GitHub issue linked: <a href=\"{$issue->html_url}\" target=\"_blank\">#{$issue->number} {$issue->title}</a>", [
                         'created_by_user_id' => auth()->id(),
                         'source_via' => \App\Thread::PERSON_USER
                     ]);
@@ -328,14 +348,18 @@ class GithubController extends Controller
             'issue_id' => 'required|integer'
         ]);
 
-        $conversation = Conversation::findOrFail($request->get('conversation_id'));
+        $conversation = \App\Conversation::with('customer')->findOrFail($request->get('conversation_id'));
         
         // Permission check
-        if (!$conversation->userCanUpdate()) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'You do not have permission to unlink issues from this conversation'
-            ], 403);
+        try {
+            if (method_exists($conversation, 'userCanUpdate') && !$conversation->userCanUpdate()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'You do not have permission to unlink issues from this conversation'
+                ], 403);
+            }
+        } catch (\Exception $e) {
+            \Helper::logException($e, '[GitHub] Permission Check Error');
         }
 
         $issue = GithubIssue::findOrFail($request->get('issue_id'));
@@ -345,10 +369,7 @@ class GithubController extends Controller
 
             if ($unlinked) {
                 // Add system note to conversation
-                \App\Thread::create([
-                    'conversation_id' => $conversation->id,
-                    'type' => \App\Thread::TYPE_NOTE,
-                    'body' => "GitHub issue unlinked: #{$issue->number} {$issue->title}",
+                \App\Thread::create($conversation, \App\Thread::TYPE_NOTE, "GitHub issue unlinked: #{$issue->number} {$issue->title}", [
                     'created_by_user_id' => auth()->id(),
                     'source_via' => \App\Thread::PERSON_USER
                 ]);
@@ -489,6 +510,8 @@ class GithubController extends Controller
             'github.organizations',
             'github.ai_service',
             'github.ai_api_key',
+            'github.ai_prompt_template',
+            'github.manual_template',
             'github.create_remote_link',
             'github.sync_status',
             'github.auto_assign_labels',
@@ -514,18 +537,50 @@ class GithubController extends Controller
      */
     public function generateContent(Request $request)
     {
-        $request->validate([
-            'conversation_id' => 'required|integer|exists:conversations,id'
-        ]);
-
-        $conversation = Conversation::findOrFail($request->get('conversation_id'));
-        
-        // Permission check
-        if (!$conversation->userCanUpdate()) {
+        try {
+            $request->validate([
+                'conversation_id' => 'required|integer|exists:conversations,id'
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'You do not have permission to access this conversation'
-            ], 403);
+                'message' => 'Invalid conversation ID',
+                'errors' => $e->errors()
+            ], 422);
+        }
+
+        try {
+            $conversationId = $request->get('conversation_id');
+            $conversation = \App\Conversation::with(['customer', 'threads'])->find($conversationId);
+            
+            if (!$conversation) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Conversation not found'
+                ], 404);
+            }
+            
+        } catch (\Exception $e) {
+            \Log::error('[GitHub] Error loading conversation', [
+                'error' => $e->getMessage(),
+                'conversation_id' => $request->get('conversation_id')
+            ]);
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error loading conversation'
+            ], 500);
+        }
+        
+        // Permission check
+        try {
+            if (method_exists($conversation, 'userCanUpdate') && !$conversation->userCanUpdate()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'You do not have permission to access this conversation'
+                ], 403);
+            }
+        } catch (\Exception $e) {
+            \Helper::logException($e, '[GitHub] Permission Check Error');
         }
 
         try {

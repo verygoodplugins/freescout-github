@@ -87,11 +87,28 @@ class GithubIssue extends Model
                 'labels' => collect($github_data['labels'])->pluck('name')->toArray(),
                 'assignees' => collect($github_data['assignees'])->pluck('login')->toArray(),
                 'author' => $github_data['user']['login'] ?? null,
-                'github_created_at' => $github_data['created_at'],
-                'github_updated_at' => $github_data['updated_at'],
+                'github_created_at' => self::parseGithubDate($github_data['created_at'] ?? null),
+                'github_updated_at' => self::parseGithubDate($github_data['updated_at'] ?? null),
                 'html_url' => $github_data['html_url']
             ]
         );
+    }
+
+    /**
+     * Parse GitHub date string safely
+     */
+    private static function parseGithubDate($dateString)
+    {
+        if (empty($dateString)) {
+            return null;
+        }
+        
+        try {
+            return \Carbon\Carbon::parse($dateString);
+        } catch (\Exception $e) {
+            \Log::warning('[GitHub] Failed to parse date: ' . $dateString, ['error' => $e->getMessage()]);
+            return null;
+        }
     }
 
     /**

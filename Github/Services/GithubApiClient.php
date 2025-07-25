@@ -38,14 +38,20 @@ class GithubApiClient
         
         $curl = curl_init();
         
+        // Determine SSL settings based on environment
+        $isLocalDev = in_array(config('app.env'), ['local', 'dev', 'development']) || 
+                      strpos(config('app.url'), '.local') !== false ||
+                      strpos(config('app.url'), 'localhost') !== false;
+        
         // Basic cURL options
         curl_setopt_array($curl, [
             CURLOPT_URL => $url,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => self::$timeout,
             CURLOPT_USERAGENT => self::$user_agent,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_SSL_VERIFYPEER => !$isLocalDev,
+            CURLOPT_SSL_VERIFYHOST => $isLocalDev ? 0 : 2,
+            CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_HTTPHEADER => [
                 'Authorization: token ' . $token,
                 'Accept: application/vnd.github.v3+json',
@@ -91,10 +97,12 @@ class GithubApiClient
         $response = curl_exec($curl);
         $http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
         $error = curl_error($curl);
+        $errno = curl_errno($curl);
+
         curl_close($curl);
 
         if ($error) {
-            \Helper::log('github_api_errors', 'cURL Error: ' . $error);
+            \Helper::log('github_api_errors', 'cURL Error: ' . $error . ' (Code: ' . $errno . ')');
             return [
                 'status' => 'error',
                 'message' => 'Connection error: ' . $error
@@ -370,43 +378,107 @@ class GithubApiClient
      */
     public static function searchIssues($repository, $query = '', $state = 'all', $per_page = 20)
     {
-        $search_query = "repo:{$repository}";
-        
-        if (!empty($query)) {
-            $search_query .= " {$query}";
-        }
-        
-        if ($state !== 'all') {
-            $search_query .= " state:{$state}";
-        }
-
-        $response = self::apiCall('search/issues', [
-            'q' => $search_query,
-            'per_page' => $per_page,
-            'sort' => 'updated'
-        ]);
-
-        if ($response['status'] === 'success') {
+        // If empty query, return empty results to avoid searching all issues
+        if (empty(trim($query))) {
             return [
                 'status' => 'success',
-                'data' => collect($response['data']['items'])->map(function ($issue) {
-                    return [
-                        'id' => $issue['id'],
-                        'number' => $issue['number'],
-                        'title' => $issue['title'],
-                        'state' => $issue['state'],
-                        'labels' => collect($issue['labels'])->pluck('name')->toArray(),
-                        'assignees' => collect($issue['assignees'])->pluck('login')->toArray(),
-                        'html_url' => $issue['html_url'],
-                        'created_at' => $issue['created_at'],
-                        'updated_at' => $issue['updated_at']
-                    ];
-                })->toArray(),
-                'total_count' => $response['data']['total_count']
+                'data' => [],
+                'total_count' => 0
             ];
         }
+        
+        $trimmedQuery = trim($query);
+        
+        // First, try searching by issue number if it looks like a number
+        if (is_numeric($trimmedQuery)) {
+            $search_query = "repo:{$repository} {$trimmedQuery}";
+            if ($state !== 'all') {
+                $search_query .= " state:{$state}";
+            }
+            
+            
+            $response = self::apiCall('search/issues', [
+                'q' => $search_query,
+                'per_page' => $per_page,
+                'sort' => 'updated'
+            ]);
+            
+            if ($response['status'] === 'success' && !empty($response['data']['items'])) {
+                return self::formatSearchResponse($response);
+            }
+        }
+        
+        // Try multiple search strategies for better matching
+        $searchStrategies = [
+            // Strategy 1: Exact phrase search (quoted)
+            "repo:{$repository} \"{$trimmedQuery}\" in:title,body",
+            // Strategy 2: Individual words (unquoted for partial matching)
+            "repo:{$repository} {$trimmedQuery} in:title,body",
+            // Strategy 3: Wildcard search if query is short enough
+            strlen($trimmedQuery) >= 3 ? "repo:{$repository} {$trimmedQuery}* in:title,body" : null
+        ];
+        
+        // Remove null strategies
+        $searchStrategies = array_filter($searchStrategies);
+        
+        $allResults = collect();
+        
+        foreach ($searchStrategies as $index => $search_query) {
+            if ($state !== 'all') {
+                $search_query .= " state:{$state}";
+            }
+            
 
-        return $response;
+            $response = self::apiCall('search/issues', [
+                'q' => $search_query,
+                'per_page' => $per_page,
+                'sort' => 'updated'
+            ]);
+            
+            if ($response['status'] === 'success' && !empty($response['data']['items'])) {
+                $allResults = $allResults->concat($response['data']['items']);
+                
+                // If we got good results from the first strategy, we can stop
+                if ($index === 0 && count($response['data']['items']) >= 5) {
+                    break;
+                }
+            }
+        }
+        
+        // Create a fake successful response with our combined results
+        $combinedResponse = [
+            'status' => 'success',
+            'data' => [
+                'items' => $allResults->unique('id')->take($per_page)->values()->toArray(),
+                'total_count' => $allResults->unique('id')->count()
+            ]
+        ];
+
+        return self::formatSearchResponse($combinedResponse);
+    }
+    
+    /**
+     * Format search response to consistent structure
+     */
+    private static function formatSearchResponse($response)
+    {
+        return [
+            'status' => 'success',
+            'data' => collect($response['data']['items'])->map(function ($issue) {
+                return [
+                    'id' => $issue['id'],
+                    'number' => $issue['number'],
+                    'title' => $issue['title'],
+                    'state' => $issue['state'],
+                    'labels' => collect($issue['labels'])->pluck('name')->toArray(),
+                    'assignees' => collect($issue['assignees'])->pluck('login')->toArray(),
+                    'html_url' => $issue['html_url'],
+                    'created_at' => $issue['created_at'],
+                    'updated_at' => $issue['updated_at']
+                ];
+            })->toArray(),
+            'total_count' => $response['data']['total_count']
+        ];
     }
 
     /**
@@ -487,7 +559,7 @@ class GithubApiClient
     {
         // This would require additional GitHub API calls or webhook setup
         // For now, we'll add a comment to the issue with the FreeScout link
-        $freescout_url = \Helper::getAppUrl();
+        $freescout_url = url('/');
         $comment_body = "🔗 **FreeScout Link**: This issue was created from FreeScout support system.\n\n" .
                        "View original conversation: {$freescout_url}";
 
@@ -509,10 +581,7 @@ class GithubApiClient
                 $conversation->updateStatus(Conversation::STATUS_CLOSED, null, false);
                 
                 // Add system note
-                \App\Thread::create([
-                    'conversation_id' => $conversation->id,
-                    'type' => \App\Thread::TYPE_NOTE,
-                    'body' => "GitHub issue #{$issue->number} in {$issue->repository} was closed. Conversation status updated automatically.",
+                \App\Thread::create($conversation, \App\Thread::TYPE_NOTE, "GitHub issue #{$issue->number} in {$issue->repository} was closed. Conversation status updated automatically.", [
                     'created_by_user_id' => null,
                     'source_via' => \App\Thread::PERSON_SYSTEM
                 ]);
@@ -546,10 +615,7 @@ class GithubApiClient
                 }
 
                 // Add system note
-                \App\Thread::create([
-                    'conversation_id' => $conversation->id,
-                    'type' => \App\Thread::TYPE_NOTE,
-                    'body' => "GitHub issue #{$issue->number} was {$event}.",
+                \App\Thread::create($conversation, \App\Thread::TYPE_NOTE, "GitHub issue #{$issue->number} was {$event}.", [
                     'created_by_user_id' => null,
                     'source_via' => \App\Thread::PERSON_SYSTEM
                 ]);

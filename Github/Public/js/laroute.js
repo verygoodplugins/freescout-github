@@ -33,8 +33,20 @@
             "name": "github.issue_details"
         },
         {
+            "uri": "github\/generate-content",
+            "name": "github.generate_content"
+        },
+        {
             "uri": "github\/label-mappings",
             "name": "github.label_mappings"
+        },
+        {
+            "uri": "github\/label-mappings",
+            "name": "github.save_label_mappings"
+        },
+        {
+            "uri": "github\/save-settings",
+            "name": "github.save_settings"
         },
         {
             "uri": "github\/webhook",
@@ -45,7 +57,6 @@
     if (typeof(laroute) != "undefined") {
         laroute.add_routes(module_routes);
     } else {
-        console.log('laroute not initialized, can not add module routes:');
-        console.log(module_routes);
+        // laroute not initialized, can not add module routes
     }
 })();
