@@ -196,7 +196,7 @@
     margin-top: 4px;
 }
 
-/* Fix modal backdrop z-index issues */
+/* Fix modal backdrop z-index issues - Production Override */
 .modal-backdrop {
     z-index: 1040 !important;
 }
@@ -209,13 +209,24 @@
     z-index: 1060 !important;
 }
 
+/* GitHub-specific modal overrides for production compatibility */
+#github-create-issue-modal,
+#github-link-issue-modal {
+    z-index: 2050 !important;
+}
+
+#github-create-issue-modal .modal-dialog,
+#github-link-issue-modal .modal-dialog {
+    z-index: 2060 !important;
+}
+
 /* Ensure connection status modal is properly layered */
 #connection-status-modal {
-    z-index: 1070 !important;
+    z-index: 2070 !important;
 }
 
 #connection-status-modal .modal-backdrop {
-    z-index: 1065 !important;
+    z-index: 2065 !important;
 }
 
 /* Search Results */

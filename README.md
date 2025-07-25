@@ -20,6 +20,7 @@ A comprehensive GitHub integration module for FreeScout that enables support tea
 |---------|------------|
 | **Module Settings** | ![Settings](./screenshots/gh-module-settings.jpg) |
 | **Create GitHub Issue** | ![Create Issue](./screenshots/create-gh-issue.jpg) |
+| **AI-Generated Issue Content** | ![AI Generated](./screenshots/gh-ai-generated-issue.jpg) |
 | **Link Existing Issue** | ![Link Issue](./screenshots/link-gh-issue.jpg) |
 
 ## 🏗️ Installation
@@ -349,6 +350,30 @@ This module is released under the same license as FreeScout. See the FreeScout l
 
 ---
 
-**Version**: 1.0.0  
+## 📋 Changelog
+
+### v1.0.0.1 (July 2025)
+- **Fixed**: Modal z-index issues in production environments
+- **Improved**: Environment-aware SSL certificate verification
+- **Enhanced**: Modal positioning with automatic body placement
+- **Added**: Comprehensive README documentation with screenshots
+
+### v1.0.0 (July 2025)
+- **Initial Release**: Full GitHub integration with AI-powered content generation
+- **Features**: Issue creation, linking, search, and bidirectional sync
+- **Support**: Multi-repository access with intelligent caching
+- **AI Integration**: OpenAI and Claude support for automated content generation
+
+---
+
+## 👨‍💻 Credits
+
+**Developed by**: [Jack Arturo](https://x.com/verygoodplugins/) from [Very Good Plugins](https://drunk.support/)
+
+Special thanks to the FreeScout community and the contributors who helped test and improve this integration.
+
+---
+
+**Version**: 1.0.0.1  
 **Compatibility**: FreeScout 1.8.0+  
 **Last Updated**: July 2025

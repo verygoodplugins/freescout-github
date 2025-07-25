@@ -105,6 +105,11 @@ function githubInitModals() {
     $(document).ready(function() {
         // Create issue modal
         $('#github-create-issue-modal').on('show.bs.modal', function() {
+            // Move modal to body to avoid z-index stacking context issues
+            if ($(this).parent().get(0) !== document.body) {
+                $(this).detach().appendTo('body');
+            }
+            
             // Use cached repositories if available to avoid unnecessary API calls
             if (GitHub.cache.repositories && GitHub.cache.repositories.length > 0) {
                 githubPopulateRepositories(GitHub.cache.repositories);
@@ -131,6 +136,10 @@ function githubInitModals() {
 
         // Link issue modal
         $('#github-link-issue-modal').on('show.bs.modal', function() {
+            // Move modal to body to avoid z-index stacking context issues
+            if ($(this).parent().get(0) !== document.body) {
+                $(this).detach().appendTo('body');
+            }
             
             // Use cached repositories if available to avoid unnecessary API calls
             if (GitHub.cache.repositories && GitHub.cache.repositories.length > 0) {
