@@ -194,7 +194,7 @@ class IssueContentGenerator
         $customerEmail = 'No email';
         if ($conversation->customer) {
             $customerName = $conversation->customer->getFullName() ?: 'Unknown Customer';
-            $customerEmail = $conversation->customer->email ?: 'No email';
+            $customerEmail = $conversation->customer->getMainEmail() ?: 'No email';
         }
 
         // Generate title
@@ -317,8 +317,8 @@ class IssueContentGenerator
         
         foreach ($threads as $thread) {
             $sender = $thread->type === \App\Thread::TYPE_CUSTOMER ? 'Customer' : 'Support';
-            $body = strip_tags($thread->body);
-            $body = strlen($body) > 300 ? substr($body, 0, 300) . '...' : $body;
+            $body = $this->extractStructuredContent($thread->body);
+            $body = strlen($body) > 800 ? substr($body, 0, 800) . '...' : $body; // Increased limit for structured content
             
             $text .= "[$sender]: $body\n\n";
         }
@@ -328,12 +328,100 @@ class IssueContentGenerator
     }
 
     /**
+     * Extract structured content from HTML, preserving form field structure
+     */
+    private function extractStructuredContent($html)
+    {
+        // Check if this looks like a structured HTML table form
+        if (strpos($html, '<table') !== false && strpos($html, '<strong>') !== false) {
+            return $this->parseHTMLTable($html);
+        }
+        
+        // Fall back to regular strip_tags for simple content
+        return strip_tags($html);
+    }
+
+    /**
+     * Parse HTML table structure to extract form fields
+     */
+    private function parseHTMLTable($html)
+    {
+        try {
+            $structured = [];
+            
+            // Create DOMDocument to parse HTML properly
+            $dom = new \DOMDocument();
+            
+            // Suppress HTML parsing warnings for malformed HTML
+            libxml_use_internal_errors(true);
+            $dom->loadHTML('<?xml encoding="utf-8" ?>' . $html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+            libxml_clear_errors();
+            
+            // Find all table rows
+            $rows = $dom->getElementsByTagName('tr');
+            $currentField = null;
+            
+            foreach ($rows as $row) {
+                $cells = $row->getElementsByTagName('td');
+                
+                if ($cells->length >= 2) {
+                    $firstCell = trim($cells->item(0)->textContent);
+                    $secondCell = trim($cells->item(1)->textContent);
+                    
+                    // Check if first cell contains a field label (has <strong> tag)
+                    $strongTags = $cells->item(0)->getElementsByTagName('strong');
+                    if ($strongTags->length > 0) {
+                        $currentField = trim($strongTags->item(0)->textContent);
+                    } else if (!empty($secondCell) && !empty($currentField) && $secondCell !== '&nbsp;') {
+                        // This is a value row for the current field
+                        $structured[$currentField] = $secondCell;
+                        $currentField = null;
+                    }
+                }
+            }
+            
+            // Format the structured data
+            $formatted = [];
+            foreach ($structured as $field => $value) {
+                if (!empty($value) && $value !== '&nbsp;') {
+                    $formatted[] = "{$field}: {$value}";
+                }
+            }
+            
+            $result = implode("\n", $formatted);
+            
+            // If we got structured data, return it, otherwise fall back to strip_tags
+            return !empty($result) ? $result : strip_tags($html);
+            
+        } catch (\Exception $e) {
+            // If HTML parsing fails, fall back to strip_tags
+            \Helper::log('github_html_parsing', 'HTML parsing failed: ' . $e->getMessage());
+            return strip_tags($html);
+        }
+    }
+
+    /**
      * Build AI prompt for content generation
      */
     private function buildPrompt($conversationText, Conversation $conversation)
     {
-        $customerName = $conversation->customer ? $conversation->customer->getFullName() : 'Unknown Customer';
-        $customerEmail = $conversation->customer ? $conversation->customer->email : 'No email';
+        $customerName = 'Unknown Customer';
+        $customerEmail = 'No email';
+        
+        if ($conversation->customer) {
+            $customerName = $conversation->customer->getFullName() ?: 'Unknown Customer';
+            $customerEmail = $conversation->customer->getMainEmail() ?: 'No email';
+        } else {
+            // Try to load customer manually if the relationship didn't work
+            if (!empty($conversation->customer_id)) {
+                $customer = \App\Customer::find($conversation->customer_id);
+                if ($customer) {
+                    $customerName = $customer->getFullName() ?: 'Unknown Customer';
+                    $customerEmail = $customer->getMainEmail() ?: 'No email';
+                }
+            }
+        }
+        
         $conversationUrl = url("/conversation/" . $conversation->id);
         $status = ucfirst($conversation->getStatusName());
         
@@ -342,7 +430,7 @@ class IssueContentGenerator
         
         if (!empty($customPrompt)) {
             // Use custom template with variable replacement
-            return str_replace([
+            $prompt = str_replace([
                 '{customer_name}',
                 '{customer_email}',
                 '{conversation_url}',
@@ -355,10 +443,12 @@ class IssueContentGenerator
                 $status,
                 $conversationText
             ], $customPrompt);
+            
+            return $prompt;
         }
         
         // Default prompt template
-        return "Create a GitHub issue from this customer support conversation.
+        $prompt = "Create a GitHub issue from this customer support conversation.
 
 Customer: $customerName
 Customer Email: $customerEmail
@@ -384,6 +474,8 @@ Respond with valid JSON in this format:
   \"title\": \"Issue title here\",
   \"body\": \"Issue body with markdown formatting\"
 }";
+
+        return $prompt;
     }
 
     /**

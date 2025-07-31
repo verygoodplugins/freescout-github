@@ -355,9 +355,10 @@ This module is released under the same license as FreeScout. See the FreeScout l
 
 ### v1.0.2 (July 31 2025)
 - **Enhanced**: Refresh functionality now fetches fresh data from GitHub API with intelligent caching
-- **Fixed**: Customer email placeholders in AI-generated issue content now show actual email addresses
+- **Enhanced**: Improved support for HTML tables in tickets (i.e. from a Gravity Forms submission)
+- **Enhanced**: Added support for `{customer_email}` placeholder in AI-generated issue content
 - **Fixed**: GitHub webhook 404 errors by removing CSRF middleware from webhook route
-- **Fixed**: Conversation status sync behavior - removed automatic status changes per user workflow
+- **Fixed**: Conversation status sync behavior - removed automatic sync between closing tickets and GitHub issues
 
 ### v1.0.1 (July 25 2025)
 - **Fixed**: Modal z-index issues in production environments
