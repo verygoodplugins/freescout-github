@@ -118,7 +118,6 @@ class GithubServiceProvider extends ServiceProvider
                 'github.ai_service' => \Option::get('github.ai_service'),
                 'github.ai_api_key' => \Option::get('github.ai_api_key'),
                 'github.create_remote_link' => \Option::get('github.create_remote_link'),
-                'github.sync_status' => \Option::get('github.sync_status'),
                 'github.auto_assign_labels' => \Option::get('github.auto_assign_labels'),
             ];
 
@@ -145,7 +144,6 @@ class GithubServiceProvider extends ServiceProvider
                 'github.ai_service' => ['env' => 'GITHUB_AI_SERVICE'],
                 'github.ai_api_key' => ['env' => 'GITHUB_AI_API_KEY'],
                 'github.create_remote_link' => ['env' => 'GITHUB_CREATE_REMOTE_LINK'],
-                'github.sync_status' => ['env' => 'GITHUB_SYNC_STATUS'],
                 'github.auto_assign_labels' => ['env' => 'GITHUB_AUTO_ASSIGN_LABELS'],
             ];
 
@@ -179,17 +177,6 @@ class GithubServiceProvider extends ServiceProvider
                 }
             }
         }, 12, 3);
-
-        // Handle conversation status changes
-        \Eventy::addAction('conversation.status_changed', function($conversation, $user, $changed_on_reply) {
-            if (\Option::get('github.sync_status')) {
-                try {
-                    \Modules\Github\Services\GithubApiClient::syncConversationStatus($conversation);
-                } catch (\Exception $e) {
-                    \Log::error('GitHub: Failed to sync conversation status: ' . $e->getMessage());
-                }
-            }
-        });
 
     }
 

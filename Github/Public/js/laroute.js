@@ -33,6 +33,14 @@
             "name": "github.issue_details"
         },
         {
+            "uri": "github\/refresh-issue\/{id}",
+            "name": "github.refresh_issue"
+        },
+        {
+            "uri": "github\/refresh-conversation-issues",
+            "name": "github.refresh_conversation_issues"
+        },
+        {
             "uri": "github\/generate-content",
             "name": "github.generate_content"
         },

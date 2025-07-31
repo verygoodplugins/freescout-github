@@ -70,8 +70,9 @@ Navigate to **Admin → Settings → GitHub** to configure:
 
 #### 🌐 Webhook Configuration
 - **Webhook URL**: `https://your-freescout-domain.com/github/webhook`
-- **Secret**: Generate a secure random string
-- **Events**: `issues`, `issue_comment`
+- **Content Type**: `application/json` (required)
+- **Secret**: Generate a secure random string (recommended for security)
+- **Events**: `issues`
 
 #### 🤖 AI Service Configuration
 - **Service**: Choose between OpenAI or Claude
@@ -353,13 +354,10 @@ This module is released under the same license as FreeScout. See the FreeScout l
 ## 📋 Changelog
 
 ### v1.0.2 (July 31 2025)
+- **Enhanced**: Refresh functionality now fetches fresh data from GitHub API with intelligent caching
 - **Fixed**: Customer email placeholders in AI-generated issue content now show actual email addresses
 - **Fixed**: GitHub webhook 404 errors by removing CSRF middleware from webhook route
 - **Fixed**: Conversation status sync behavior - removed automatic status changes per user workflow
-- **Enhanced**: Refresh functionality now fetches fresh data from GitHub API with intelligent caching
-- **Enhanced**: Webhook handler includes proper error handling and logging
-- **Improved**: AI prompt templates now include customer email in generation context
-- **Added**: Support for `{customer_email}` variable in custom AI prompt templates
 
 ### v1.0.1 (July 25 2025)
 - **Fixed**: Modal z-index issues in production environments

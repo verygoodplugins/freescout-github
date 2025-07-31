@@ -245,19 +245,6 @@ Respond with valid JSON in this format:
             </div>
         </div>
 
-        <div class="form-group">
-            <label for="github_sync_status" class="col-sm-2 control-label">{{ __('Sync Status') }}</label>
-            <div class="col-sm-6">
-                <div class="controls">
-                    <label class="control-label">
-                        <input type="checkbox" name="settings[github.sync_status]" value="1" {{ old('settings.github.sync_status', \Option::get('github.sync_status', true)) ? 'checked' : '' }}> {{ __('Sync GitHub issue status with conversations') }}
-                    </label>
-                </div>
-                <p class="form-help">
-                    {{ __('Automatically update conversation status when GitHub issues are closed/reopened') }}
-                </p>
-            </div>
-        </div>
 
         <div class="form-group">
             <label for="github_auto_assign_labels" class="col-sm-2 control-label">{{ __('Auto-assign Labels') }}</label>
