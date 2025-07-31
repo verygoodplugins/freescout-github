@@ -697,6 +697,9 @@ $(document).ready(function() {
         if (!GitHub.cache.repositories) {
             githubLoadRepositories();
         }
+        
+        // Auto-refresh issues when conversation is opened (with intelligent caching)
+        githubAutoRefreshOnLoad();
     }
     
     // Check if we're on the settings page
@@ -880,23 +883,166 @@ function githubUnlinkIssue(issueId) {
 }
 
 function githubRefreshIssue(issueId) {
-    $('[data-issue-id="' + issueId + '"]').find('.glyphicon-refresh').addClass('glyphicon-spin');
+    var $refreshButton = $('[data-issue-id="' + issueId + '"]').find('.glyphicon-refresh');
+    $refreshButton.addClass('glyphicon-spin');
     
-    var url = laroute.route('github.issue_details', {id: issueId});
+    var url = laroute.route('github.refresh_issue', {id: issueId});
     
     $.ajax({
         url: url,
-        type: 'GET',
+        type: 'POST',
+        data: {
+            _token: $('meta[name="csrf-token"]').attr('content')
+        },
         success: function(response) {
             if (response.status === 'success') {
+                showFloatingAlert('success', 'Issue refreshed successfully');
+                // Reload the page to show updated issue data
                 window.location.reload();
+            } else {
+                showFloatingAlert('error', response.message || 'Failed to refresh issue');
             }
         },
-        error: function(xhr, status, error) {
-            showFloatingAlert('error', 'Failed to refresh issue: ' + error);
+        error: function(xhr) {
+            var response = xhr.responseJSON || {};
+            var errorMessage = response.message || 'Failed to refresh issue';
+            
+            if (xhr.status === 403) {
+                errorMessage = 'You do not have permission to refresh this issue';
+            } else if (xhr.status === 404) {
+                errorMessage = 'Issue not found';
+            }
+            
+            showFloatingAlert('error', errorMessage);
         },
         complete: function() {
-            $('[data-issue-id="' + issueId + '"]').find('.glyphicon-refresh').removeClass('glyphicon-spin');
+            $refreshButton.removeClass('glyphicon-spin');
         }
     });
+}
+
+/**
+ * Refresh all issues for the current conversation with intelligent caching
+ */
+function githubRefreshConversationIssues() {
+    var conversationId = getGlobalAttr('conversation_id');
+    if (!conversationId) {
+        console.warn('GitHub: No conversation ID found for auto-refresh');
+        return;
+    }
+    
+    var $refreshButtons = $('.github-issue-action[data-action="refresh"] .glyphicon-refresh');
+    $refreshButtons.addClass('glyphicon-spin');
+    
+    $.ajax({
+        url: laroute.route('github.refresh_conversation_issues'),
+        type: 'POST',
+        data: {
+            conversation_id: conversationId,
+            _token: $('meta[name="csrf-token"]').attr('content')
+        },
+        success: function(response) {
+            if (response.status === 'success') {
+                // Only show success message if manually triggered
+                var isManualRefresh = arguments.callee.caller && arguments.callee.caller.name === 'githubManualRefreshConversation';
+                if (isManualRefresh) {
+                    showFloatingAlert('success', 'All issues refreshed successfully');
+                }
+                
+                // Check if any issues were actually updated
+                var needsReload = false;
+                if (response.data && response.data.length > 0) {
+                    // Simple check: if we have issues and they might have been updated
+                    needsReload = true;
+                }
+                
+                if (needsReload) {
+                    // Reload to show updated data
+                    window.location.reload();
+                }
+            } else {
+                showFloatingAlert('error', response.message || 'Failed to refresh issues');
+            }
+        },
+        error: function(xhr) {
+            var response = xhr.responseJSON || {};
+            var errorMessage = response.message || 'Failed to refresh issues';
+            
+            if (xhr.status === 403) {
+                errorMessage = 'You do not have permission to refresh issues';
+            }
+            
+            showFloatingAlert('error', errorMessage);
+        },
+        complete: function() {
+            $refreshButtons.removeClass('glyphicon-spin');
+        }
+    });
+}
+
+/**
+ * Manual refresh function for explicit user action
+ */
+function githubManualRefreshConversation() {
+    githubRefreshConversationIssues();
+}
+
+/**
+ * Auto-refresh issues when conversation is loaded
+ * Uses intelligent caching to prevent excessive API calls
+ */
+function githubAutoRefreshOnLoad() {
+    var conversationId = getGlobalAttr('conversation_id');
+    if (!conversationId) {
+        return;
+    }
+    
+    // Check if there are any GitHub issues in the sidebar
+    var $githubIssues = $('.github-issue-item');
+    if ($githubIssues.length === 0) {
+        return; // No issues to refresh
+    }
+    
+    // Check local storage to see when we last auto-refreshed this conversation
+    var lastAutoRefreshKey = 'github_auto_refresh_conv_' + conversationId;
+    var lastAutoRefresh = localStorage.getItem(lastAutoRefreshKey);
+    var now = Date.now();
+    var fiveMinutes = 5 * 60 * 1000; // 5 minutes in milliseconds
+    
+    if (lastAutoRefresh && (now - parseInt(lastAutoRefresh)) < fiveMinutes) {
+        // Skip auto-refresh if we've done it recently
+        console.log('GitHub: Skipping auto-refresh, done recently');
+        return;
+    }
+    
+    // Perform silent refresh (no success message)
+    console.log('GitHub: Auto-refreshing issues for conversation');
+    githubRefreshConversationIssues();
+    
+    // Update the last auto-refresh timestamp
+    localStorage.setItem(lastAutoRefreshKey, now.toString());
+    
+    // Clean up old timestamps (keep only last 50 conversations)
+    try {
+        var keysToClean = [];
+        for (var key in localStorage) {
+            if (key.startsWith('github_auto_refresh_conv_')) {
+                keysToClean.push({
+                    key: key,
+                    timestamp: parseInt(localStorage.getItem(key) || '0')
+                });
+            }
+        }
+        
+        // Sort by timestamp and keep only the most recent 50
+        keysToClean.sort(function(a, b) { return b.timestamp - a.timestamp; });
+        if (keysToClean.length > 50) {
+            for (var i = 50; i < keysToClean.length; i++) {
+                localStorage.removeItem(keysToClean[i].key);
+            }
+        }
+    } catch (e) {
+        // Ignore localStorage errors
+        console.warn('GitHub: Failed to clean up localStorage:', e);
+    }
 }

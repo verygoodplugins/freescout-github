@@ -568,26 +568,6 @@ class GithubApiClient
         ], self::API_METHOD_POST);
     }
 
-    /**
-     * Sync conversation status when GitHub issue changes
-     */
-    public static function syncConversationStatus($conversation)
-    {
-        $issues = GithubIssue::conversationLinkedIssues($conversation->id);
-        
-        foreach ($issues as $issue) {
-            if ($issue->isClosed() && $conversation->status != Conversation::STATUS_CLOSED) {
-                // Update conversation status
-                $conversation->updateStatus(Conversation::STATUS_CLOSED, null, false);
-                
-                // Add system note
-                \App\Thread::create($conversation, \App\Thread::TYPE_NOTE, "GitHub issue #{$issue->number} in {$issue->repository} was closed. Conversation status updated automatically.", [
-                    'created_by_user_id' => null,
-                    'source_via' => \App\Thread::PERSON_SYSTEM
-                ]);
-            }
-        }
-    }
 
     /**
      * Handle GitHub webhook
@@ -606,15 +586,9 @@ class GithubApiClient
         $issue = GithubIssue::createOrUpdateFromGithub($issue_data, $repository);
 
         // Handle status changes
-        if (in_array($event, ['closed', 'reopened'])) {
+        if (in_array($event, ['closed', 'reopened', 'opened'])) {
             foreach ($issue->conversations as $conversation) {
-                if ($event === 'closed') {
-                    $conversation->updateStatus(Conversation::STATUS_CLOSED, null, false);
-                } else if ($event === 'reopened') {
-                    $conversation->updateStatus(Conversation::STATUS_ACTIVE, null, false);
-                }
-
-                // Add system note
+                // Just add the note - let humans decide the conversation status
                 \App\Thread::create($conversation, \App\Thread::TYPE_NOTE, "GitHub issue #{$issue->number} was {$event}.", [
                     'created_by_user_id' => null,
                     'source_via' => \App\Thread::PERSON_SYSTEM

@@ -173,6 +173,119 @@ class GithubController extends Controller
     }
 
     /**
+     * Refresh issue data from GitHub API
+     */
+    public function refreshIssue(Request $request, $id)
+    {
+        $issue = GithubIssue::find($id);
+        
+        if (!$issue) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Issue not found'
+            ], 404);
+        }
+
+        try {
+            // Fetch fresh data from GitHub API
+            $result = GithubApiClient::getIssue($issue->repository, $issue->number);
+            
+            if ($result['status'] === 'success') {
+                // Update local issue with fresh data
+                $updatedIssue = GithubIssue::createOrUpdateFromGithub($result['data'], $issue->repository);
+                
+                return response()->json([
+                    'status' => 'success',
+                    'message' => 'Issue refreshed successfully',
+                    'data' => $updatedIssue
+                ]);
+            } else {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $result['message'] ?? 'Failed to refresh issue from GitHub'
+                ], 400);
+            }
+        } catch (\Exception $e) {
+            \Helper::logException($e, '[GitHub] Refresh Issue Error');
+            
+            return response()->json([
+                'status' => 'error',
+                'message' => 'An error occurred while refreshing the issue'
+            ], 500);
+        }
+    }
+
+    /**
+     * Refresh all issues for a conversation with intelligent caching
+     */
+    public function refreshConversationIssues(Request $request)
+    {
+        $request->validate([
+            'conversation_id' => 'required|integer|exists:conversations,id'
+        ]);
+
+        $conversation = \App\Conversation::findOrFail($request->get('conversation_id'));
+        
+        // Permission check
+        try {
+            if (method_exists($conversation, 'userCanUpdate') && !$conversation->userCanUpdate()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'You do not have permission to refresh issues for this conversation'
+                ], 403);
+            }
+        } catch (\Exception $e) {
+            \Helper::logException($e, '[GitHub] Permission Check Error');
+        }
+
+        try {
+            $issues = GithubIssue::conversationLinkedIssues($conversation->id);
+            $refreshedIssues = [];
+            $cacheTime = now()->timestamp;
+            
+            foreach ($issues as $issue) {
+                // Check if issue was recently refreshed (within 5 minutes)
+                $cacheKey = "github_issue_refresh_{$issue->id}";
+                $lastRefresh = \Cache::get($cacheKey, 0);
+                
+                if ($cacheTime - $lastRefresh < 300) { // 5 minutes
+                    // Use cached data
+                    $refreshedIssues[] = $issue;
+                    continue;
+                }
+                
+                // Fetch fresh data from GitHub
+                $result = GithubApiClient::getIssue($issue->repository, $issue->number);
+                
+                if ($result['status'] === 'success') {
+                    $updatedIssue = GithubIssue::createOrUpdateFromGithub($result['data'], $issue->repository);
+                    $refreshedIssues[] = $updatedIssue;
+                    
+                    // Cache the refresh timestamp
+                    \Cache::put($cacheKey, $cacheTime, 300); // Cache for 5 minutes
+                } else {
+                    // If refresh fails, still include the existing issue
+                    $refreshedIssues[] = $issue;
+                    \Log::warning("GitHub: Failed to refresh issue {$issue->id}: " . ($result['message'] ?? 'Unknown error'));
+                }
+            }
+            
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Issues refreshed successfully',
+                'data' => $refreshedIssues
+            ]);
+        } catch (\Exception $e) {
+            \Helper::logException($e, '[GitHub] Refresh Conversation Issues Error');
+            
+            return response()->json([
+                'status' => 'error',
+                'message' => 'An error occurred while refreshing issues'
+            ], 500);
+        }
+    }
+
+    /**
      * Create new GitHub issue
      */
     public function createIssue(Request $request)
@@ -513,18 +626,17 @@ class GithubController extends Controller
             'github.ai_prompt_template',
             'github.manual_template',
             'github.create_remote_link',
-            'github.sync_status',
             'github.auto_assign_labels',
         ];
         foreach ($allowed as $key) {
             if (array_key_exists($key, $settings)) {
                 // Checkbox values: if not set, set to 0
                 $value = $settings[$key];
-                if (in_array($key, ['github.create_remote_link', 'github.sync_status', 'github.auto_assign_labels'])) {
+                if (in_array($key, ['github.create_remote_link', 'github.auto_assign_labels'])) {
                     $value = $value ? 1 : 0;
                 }
                 \Option::set($key, $value);
-            } else if (in_array($key, ['github.create_remote_link', 'github.sync_status', 'github.auto_assign_labels'])) {
+            } else if (in_array($key, ['github.create_remote_link', 'github.auto_assign_labels'])) {
                 // Unchecked checkboxes
                 \Option::set($key, 0);
             }

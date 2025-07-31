@@ -6,6 +6,11 @@
             {{ __('GitHub Issues') }}
         </h3>
         <div class="sidebar-block-header-actions">
+            @if($issues->count() > 0)
+                <a href="#" class="btn btn-default btn-xs" onclick="githubManualRefreshConversation(); return false;" title="{{ __('Refresh All Issues') }}">
+                    <i class="glyphicon glyphicon-refresh"></i>
+                </a>
+            @endif
             <a href="#" class="btn btn-default btn-xs" data-toggle="modal" data-target="#github-create-issue-modal" title="{{ __('Create Issue') }}">
                 <i class="glyphicon glyphicon-plus"></i>
             </a>

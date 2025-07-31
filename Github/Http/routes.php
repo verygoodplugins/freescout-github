@@ -15,6 +15,8 @@ Route::group([
     Route::post('/github/link-issue', 'GithubController@linkIssue')->name('github.link_issue');
     Route::post('/github/unlink-issue', 'GithubController@unlinkIssue')->name('github.unlink_issue');
     Route::get('/github/issue-details/{id}', 'GithubController@getIssueDetails')->name('github.issue_details');
+    Route::post('/github/refresh-issue/{id}', 'GithubController@refreshIssue')->name('github.refresh_issue');
+    Route::post('/github/refresh-conversation-issues', 'GithubController@refreshConversationIssues')->name('github.refresh_conversation_issues');
     Route::post('/github/generate-content', 'GithubController@generateContent')->name('github.generate_content');
     
     // Settings routes
@@ -29,9 +31,8 @@ Route::group([
     
 });
 
-// Public webhook route (no auth required)
+// Public webhook route (no middleware - external access required)
 Route::group([
-    'middleware' => ['web'],
     'prefix' => \Helper::getSubdirectory(),
     'namespace' => 'Modules\Github\Http\Controllers'
 ], function () {

@@ -333,6 +333,7 @@ class IssueContentGenerator
     private function buildPrompt($conversationText, Conversation $conversation)
     {
         $customerName = $conversation->customer ? $conversation->customer->getFullName() : 'Unknown Customer';
+        $customerEmail = $conversation->customer ? $conversation->customer->email : 'No email';
         $conversationUrl = url("/conversation/" . $conversation->id);
         $status = ucfirst($conversation->getStatusName());
         
@@ -343,11 +344,13 @@ class IssueContentGenerator
             // Use custom template with variable replacement
             return str_replace([
                 '{customer_name}',
+                '{customer_email}',
                 '{conversation_url}',
                 '{status}',
                 '{conversation_text}'
             ], [
                 $customerName,
+                $customerEmail,
                 $conversationUrl,
                 $status,
                 $conversationText
@@ -358,6 +361,7 @@ class IssueContentGenerator
         return "Create a GitHub issue from this customer support conversation.
 
 Customer: $customerName
+Customer Email: $customerEmail
 FreeScout URL: $conversationUrl
 Status: $status
 
@@ -368,7 +372,7 @@ Requirements:
 1. Create a clear, professional issue title (max 80 characters)
 2. Create a detailed issue body with:
    - Brief problem summary
-   - Customer details (name, email)
+   - Customer details (name: $customerName, email: $customerEmail)
    - Original message context
    - Link back to FreeScout conversation
    - Any technical details mentioned

@@ -352,13 +352,22 @@ This module is released under the same license as FreeScout. See the FreeScout l
 
 ## 📋 Changelog
 
-### v1.0.0.1 (July 2025)
+### v1.0.2 (July 31 2025)
+- **Fixed**: Customer email placeholders in AI-generated issue content now show actual email addresses
+- **Fixed**: GitHub webhook 404 errors by removing CSRF middleware from webhook route
+- **Fixed**: Conversation status sync behavior - removed automatic status changes per user workflow
+- **Enhanced**: Refresh functionality now fetches fresh data from GitHub API with intelligent caching
+- **Enhanced**: Webhook handler includes proper error handling and logging
+- **Improved**: AI prompt templates now include customer email in generation context
+- **Added**: Support for `{customer_email}` variable in custom AI prompt templates
+
+### v1.0.1 (July 25 2025)
 - **Fixed**: Modal z-index issues in production environments
 - **Improved**: Environment-aware SSL certificate verification
 - **Enhanced**: Modal positioning with automatic body placement
 - **Added**: Comprehensive README documentation with screenshots
 
-### v1.0.0 (July 2025)
+### v1.0.0 (July 25 2025)
 - **Initial Release**: Full GitHub integration with AI-powered content generation
 - **Features**: Issue creation, linking, search, and bidirectional sync
 - **Support**: Multi-repository access with intelligent caching
@@ -374,6 +383,6 @@ Special thanks to the FreeScout community and the contributors who helped test a
 
 ---
 
-**Version**: 1.0.0.1  
+**Version**: 1.0.2  
 **Compatibility**: FreeScout 1.8.0+  
 **Last Updated**: July 2025
