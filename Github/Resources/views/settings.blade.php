@@ -111,13 +111,30 @@
             </div>
         </div>
 
+        <div class="form-group{{ $errors->has('github.openai_model') ? ' has-error' : '' }}" id="openai_model_group" style="display: none;">
+            <label for="github_openai_model" class="col-sm-2 control-label">{{ __('OpenAI Model') }}</label>
+            <div class="col-sm-6">
+                <select class="form-control" name="settings[github.openai_model]" id="github_openai_model">
+                    <option value="gpt-5-mini" {{ old('settings.github.openai_model', \Option::get('github.openai_model', 'gpt-5-mini')) == 'gpt-5-mini' ? 'selected' : '' }}>GPT-5 Mini (Fast & Efficient)</option>
+                    <option value="gpt-5" {{ old('settings.github.openai_model', \Option::get('github.openai_model', 'gpt-5-mini')) == 'gpt-5' ? 'selected' : '' }}>GPT-5 (Advanced)</option>
+                    <option value="gpt-4-turbo-preview" {{ old('settings.github.openai_model', \Option::get('github.openai_model', 'gpt-5-mini')) == 'gpt-4-turbo-preview' ? 'selected' : '' }}>GPT-4 Turbo</option>
+                    <option value="gpt-3.5-turbo" {{ old('settings.github.openai_model', \Option::get('github.openai_model', 'gpt-5-mini')) == 'gpt-3.5-turbo' ? 'selected' : '' }}>GPT-3.5 Turbo (Legacy)</option>
+                </select>
+                @include('partials/field_error', ['field'=>'github.openai_model'])
+                <p class="form-help">
+                    {{ __('GPT-5 Mini is recommended for most use cases. GPT-5 will be used automatically for complex requests.') }}
+                </p>
+            </div>
+        </div>
+
         <!-- Issue Template Configuration -->
         <div class="form-group">
             <label class="col-sm-2 control-label">{{ __('AI Prompt Template') }}</label>
             <div class="col-sm-10">
-                <textarea class="form-control" name="settings[github.ai_prompt_template]" rows="12" placeholder="Create a GitHub issue from this customer support conversation.
+                <textarea class="form-control" name="settings[github.ai_prompt_template]" rows="15" placeholder="Create a GitHub issue from this customer support conversation.
 
 Customer: {customer_name}
+Customer Email: {customer_email}
 FreeScout URL: {conversation_url}
 Status: {status}
 
@@ -126,14 +143,20 @@ Conversation:
 
 Requirements:
 1. Create a clear, professional issue title (max 80 characters)
-2. Create a detailed issue body with:
-   - Brief problem summary
-   - Customer details (name, email)
-   - Original message context
-   - Link back to FreeScout conversation
-   - Any technical details mentioned
-3. Use proper GitHub markdown formatting
-4. Be professional and technical in tone
+2. Create a detailed issue body with these sections:
+   - **Problem Summary**: Brief description of the issue
+   - **Customer Details**: name: {customer_name}, email: {customer_email}
+   - **Root Cause Analysis**: Include any diagnostic findings, reproduction confirmations, or technical analysis from support team (e.g., &quot;CSS issue&quot;, &quot;element inspection revealed&quot;, &quot;reproduced on test site&quot;)
+   - **Steps to Reproduce**: Any reproduction steps mentioned by customer or support team
+   - **Troubleshooting Performed**: Methods used to isolate the issue (Health Check plugin, plugin conflicts, etc.)
+   - **Plugin Conflicts**: Specific conflicting plugins identified
+   - **Support Team Findings**: Key diagnostic information from internal notes (inspection results, confirmed reproduction, technical analysis)
+   - **Customer Environment**: Setup details and troubleshooting methods used
+
+3. Pay special attention to support team internal notes - these often contain crucial diagnostic information
+4. Use proper GitHub markdown formatting with clear sections
+5. Be professional and technical in tone
+6. Make the issue actionable for developers by including all diagnostic details
 
 Respond with valid JSON in this format:
 {
@@ -142,6 +165,7 @@ Respond with valid JSON in this format:
 }">{{ old('settings.github.ai_prompt_template', \Option::get('github.ai_prompt_template', 'Create a GitHub issue from this customer support conversation.
 
 Customer: {customer_name}
+Customer Email: {customer_email}
 FreeScout URL: {conversation_url}
 Status: {status}
 
@@ -150,14 +174,20 @@ Conversation:
 
 Requirements:
 1. Create a clear, professional issue title (max 80 characters)
-2. Create a detailed issue body with:
-   - Brief problem summary
-   - Customer details (name, email)
-   - Original message context
-   - Link back to FreeScout conversation
-   - Any technical details mentioned
-3. Use proper GitHub markdown formatting
-4. Be professional and technical in tone
+2. Create a detailed issue body with these sections:
+   - **Problem Summary**: Brief description of the issue
+   - **Customer Details**: name: {customer_name}, email: {customer_email}
+   - **Root Cause Analysis**: Include any diagnostic findings, reproduction confirmations, or technical analysis from support team (e.g., "CSS issue", "element inspection revealed", "reproduced on test site")
+   - **Steps to Reproduce**: Any reproduction steps mentioned by customer or support team
+   - **Troubleshooting Performed**: Methods used to isolate the issue (Health Check plugin, plugin conflicts, etc.)
+   - **Plugin Conflicts**: Specific conflicting plugins identified
+   - **Support Team Findings**: Key diagnostic information from internal notes (inspection results, confirmed reproduction, technical analysis)
+   - **Customer Environment**: Setup details and troubleshooting methods used
+
+3. Pay special attention to support team internal notes - these often contain crucial diagnostic information
+4. Use proper GitHub markdown formatting with clear sections
+5. Be professional and technical in tone
+6. Make the issue actionable for developers by including all diagnostic details
 
 Respond with valid JSON in this format:
 {
@@ -291,5 +321,4 @@ Respond with valid JSON in this format:
         </div>
     </form>
 </div>
-
 

@@ -17,6 +17,33 @@ var GitHub = {
 
 function githubInitSettings() {
     $(document).ready(function() {
+        // Show/hide OpenAI model dropdown based on AI service selection
+        function toggleOpenAIModel() {
+            var selectedService = $('#github_ai_service').val();
+            console.log('AI Service selected:', selectedService); // Debug log
+            
+            if (selectedService === 'openai') {
+                $('#openai_model_group').show();
+                console.log('Showing OpenAI model group'); // Debug log
+            } else {
+                $('#openai_model_group').hide();
+                console.log('Hiding OpenAI model group'); // Debug log
+            }
+        }
+
+        // Bind the change event for AI service dropdown
+        $('#github_ai_service').on('change', toggleOpenAIModel);
+        
+        // Set initial state with a small delay to ensure DOM is fully loaded
+        setTimeout(function() {
+            toggleOpenAIModel();
+        }, 100);
+        
+        // Also trigger on page load in case the value is pre-selected
+        $(window).on('load', function() {
+            toggleOpenAIModel();
+        });
+
         // Test connection button
         $("#test-connection").click(function(e) {
             e.preventDefault();

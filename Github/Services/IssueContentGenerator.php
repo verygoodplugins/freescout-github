@@ -63,7 +63,7 @@ class IssueContentGenerator
             ],
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => \Helper::jsonEncodeSafe([
-                'model' => 'gpt-3.5-turbo',
+                'model' => \Option::get('github.openai_model', 'gpt-3.5-turbo'),
                 'messages' => [
                     [
                         'role' => 'system',
@@ -640,21 +640,21 @@ Requirements:
 2. Create a detailed issue body with these sections:
    - **Problem Summary**: Brief description of the issue
    - **Customer Details**: name: $customerName, email: $customerEmail
-   - **Reproduction Status**: Include if support team confirmed reproduction
-   - **Root Cause**: Include any identified root cause or technical analysis
-   - **Symptoms**: List specific symptoms or behaviors
-   - **Plugin Conflicts**: Any conflicting plugins identified
-   - **Customer Environment**: Customer's setup details (WordPress version, troubleshooting methods, etc.)
-   - **Steps to Reproduce**: Any reproduction steps mentioned
-   - **Support Analysis**: Key findings from support team investigation
+   - **Root Cause Analysis**: Include any diagnostic findings, reproduction confirmations, or technical analysis from support team (e.g., \"CSS issue\", \"element inspection revealed\", \"reproduced on test site\")
+   - **Steps to Reproduce**: Any reproduction steps mentioned by customer or support team
+   - **Troubleshooting Performed**: Methods used to isolate the issue (Health Check plugin, plugin conflicts, etc.)
+   - **Plugin Conflicts**: Specific conflicting plugins identified
+   - **Support Team Findings**: Key diagnostic information from internal notes (inspection results, confirmed reproduction, technical analysis)
+   - **Customer Environment**: Setup details and troubleshooting methods used
    - **Conversation Context**: Include the full conversation JSON from the last 7 days
 
-3. Use proper GitHub markdown formatting with clear sections
-4. Be professional and technical in tone
-5. Make the issue actionable for developers
-6. The conversation data is provided as structured JSON - parse it carefully
-7. If diagnostic information is provided above, prioritize it over manual conversation parsing
-8. Do NOT include external links (Loom, Google Drive, etc.) - they've been filtered out
+3. Pay special attention to support team internal notes (type: \"Support Team (Internal Note)\") - these often contain crucial diagnostic information
+4. Use proper GitHub markdown formatting with clear sections
+5. Be professional and technical in tone
+6. Make the issue actionable for developers by including all diagnostic details
+7. The conversation data is provided as structured JSON - parse it carefully
+8. If diagnostic information is provided above, prioritize it over manual conversation parsing
+9. Do NOT include external links (Loom, Google Drive, etc.) - they've been filtered out
 
 Respond with valid JSON in this format:
 {
