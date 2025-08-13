@@ -326,11 +326,30 @@ class GithubController extends Controller
             
             // Auto-generate content if AI is enabled and fields are empty
             if ($aiEnabled && (empty($title) || empty($body))) {
-                $contentGenerator = new IssueContentGenerator();
-                $generatedContent = $contentGenerator->generateContent($conversation);
-                
-                $title = $title ?: $generatedContent['title'];
-                $body = $body ?: $generatedContent['body'];
+                try {
+                    // Get available labels for AI suggestions
+                    $availableLabels = [];
+                    $labelsResult = GithubApiClient::getLabels($repository);
+                    if ($labelsResult['status'] === 'success') {
+                        $availableLabels = array_map(function($label) {
+                            return $label['name'];
+                        }, $labelsResult['data'] ?? []);
+                    }
+
+                    $contentGenerator = new IssueContentGenerator();
+                    $generatedContent = $contentGenerator->generateContent($conversation, $availableLabels);
+                    
+                    $title = $title ?: $generatedContent['title'];
+                    $body = $body ?: $generatedContent['body'];
+                } catch (\Exception $e) {
+                    // Log the error but return it to frontend for display
+                    \Helper::log('github_controller_error', 'AI content generation failed: ' . $e->getMessage());
+                    
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => $e->getMessage()
+                    ], 400);
+                }
             }
 
             // Auto-assign labels if requested
@@ -623,6 +642,7 @@ class GithubController extends Controller
             'github.organizations',
             'github.ai_service',
             'github.ai_api_key',
+            'github.openai_model',
             'github.ai_prompt_template',
             'github.manual_template',
             'github.create_remote_link',
@@ -696,8 +716,20 @@ class GithubController extends Controller
         }
 
         try {
+            // Get available labels for AI suggestions
+            $defaultRepository = \Option::get('github.default_repository');
+            $availableLabels = [];
+            if ($defaultRepository) {
+                $labelsResult = GithubApiClient::getLabels($defaultRepository);
+                if ($labelsResult['status'] === 'success') {
+                    $availableLabels = array_map(function($label) {
+                        return $label['name'];
+                    }, $labelsResult['data'] ?? []);
+                }
+            }
+
             $contentGenerator = new IssueContentGenerator();
-            $generatedContent = $contentGenerator->generateContent($conversation);
+            $generatedContent = $contentGenerator->generateContent($conversation, $availableLabels);
             
             return response()->json([
                 'status' => 'success',
@@ -706,9 +738,17 @@ class GithubController extends Controller
         } catch (\Exception $e) {
             \Helper::logException($e, '[GitHub] Generate Content Error');
             
+            // Return the actual error message for API errors, generic message for others
+            $errorMessage = 'Failed to generate content';
+            if (strpos($e->getMessage(), 'Failed to generate content:') === 0) {
+                $errorMessage = $e->getMessage();
+            } else {
+                $errorMessage .= ': ' . $e->getMessage();
+            }
+            
             return response()->json([
                 'status' => 'error',
-                'message' => 'Failed to generate content: ' . $e->getMessage()
+                'message' => $errorMessage
             ], 500);
         }
     }

@@ -623,6 +623,8 @@ function githubGenerateIssueContent() {
             _token: $('meta[name="csrf-token"]').attr('content')
         },
         success: function(response) {
+            console.log('GitHub: Generate content success response:', response);
+            
             if (response.status === 'success') {
                 if (response.data.title && !$titleField.val()) {
                     $titleField.val(response.data.title);
@@ -630,18 +632,62 @@ function githubGenerateIssueContent() {
                 if (response.data.body && !$bodyField.val()) {
                     $bodyField.val(response.data.body);
                 }
+                
+                // Auto-select suggested labels if available
+                if (response.data.suggested_labels && response.data.suggested_labels.length > 0) {
+                    var labelsSelect = $('#github-issue-labels');
+                    if (labelsSelect.hasClass('select2-hidden-accessible')) {
+                        labelsSelect.val(response.data.suggested_labels).trigger('change');
+                        console.log('Auto-selected labels:', response.data.suggested_labels);
+                    }
+                }
+                
                 showFloatingAlert('success', 'Content generated successfully');
             } else {
-                showFloatingAlert('error', response.message || 'Failed to generate content');
+                // Handle error responses that come back as 200 but with error status
+                var errorMessage = response.message || 'Failed to generate content';
+                console.error('GitHub: Server returned error status:', response);
+                showFloatingAlert('error', errorMessage);
             }
         },
         error: function(xhr) {
             console.error('GitHub: Generate content error:', xhr);
             var response = xhr.responseJSON || {};
-            var errorMessage = response.message || 'Failed to generate content';
+            var errorMessage = 'Failed to generate content';
+            
+            // Handle cases where the response might be a JSON string instead of object
+            if (typeof response === 'string') {
+                try {
+                    response = JSON.parse(response);
+                } catch (e) {
+                    console.error('GitHub: Failed to parse error response as JSON:', response);
+                    response = {};
+                }
+            }
+            
+            // Extract the actual error message
+            if (response.message) {
+                errorMessage = response.message;
+            } else if (xhr.responseText) {
+                // Try to extract error from response text
+                try {
+                    var textResponse = JSON.parse(xhr.responseText);
+                    if (textResponse.message) {
+                        errorMessage = textResponse.message;
+                    }
+                } catch (e) {
+                    // If it's not JSON, use the raw text (truncated)
+                    errorMessage = xhr.responseText.length > 200 ? 
+                        xhr.responseText.substring(0, 200) + '...' : 
+                        xhr.responseText;
+                }
+            }
             
             // Add more detailed error info for debugging
-            if (xhr.status === 500 && !response.message) {
+            if (xhr.status === 400 && response.message) {
+                // API errors (like OpenAI parameter issues)
+                errorMessage = response.message;
+            } else if (xhr.status === 500 && !response.message) {
                 errorMessage = 'Server error occurred. Check server logs for details.';
             } else if (xhr.status === 422 && response.errors) {
                 var errors = [];
@@ -650,6 +696,15 @@ function githubGenerateIssueContent() {
                 }
                 errorMessage = errors.join(', ');
             }
+            
+            // Log detailed error for debugging
+            console.error('GitHub: Detailed error info:', {
+                status: xhr.status,
+                statusText: xhr.statusText,
+                response: response,
+                responseText: xhr.responseText,
+                finalErrorMessage: errorMessage
+            });
             
             showFloatingAlert('error', errorMessage);
         },

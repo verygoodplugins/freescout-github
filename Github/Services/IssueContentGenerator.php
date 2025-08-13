@@ -9,27 +9,40 @@ class IssueContentGenerator
     /**
      * Generate issue title and body from conversation
      */
-    public function generateContent(Conversation $conversation)
+    public function generateContent(Conversation $conversation, $availableLabels = [])
     {
+        // Single, clean log entry
+        \Helper::log('github_ai', 'Content generation started for conversation #' . $conversation->id . ' with ' . count($availableLabels) . ' available labels');
+
         $aiService = \Option::get('github.ai_service');
         $aiApiKey = \Option::get('github.ai_api_key');
 
         if (!$aiApiKey || empty($aiService)) {
-            // Fallback to manual content generation
+            \Helper::log('github_ai', 'No AI service configured, using manual generation');
             return $this->generateManualContent($conversation);
         }
 
         try {
             switch ($aiService) {
                 case 'openai':
-                    return $this->generateWithOpenAI($conversation, $aiApiKey);
+                    \Helper::log('github_ai', 'Using OpenAI service for conversation #' . $conversation->id);
+                    return $this->generateWithOpenAI($conversation, $aiApiKey, $availableLabels);
                 case 'claude':
-                    return $this->generateWithClaude($conversation, $aiApiKey);
+                    \Helper::log('github_ai', 'Using Claude service for conversation #' . $conversation->id);
+                    return $this->generateWithClaude($conversation, $aiApiKey, $availableLabels);
                 default:
+                    \Helper::log('github_ai', 'Unknown AI service (' . $aiService . '), using manual generation');
                     return $this->generateManualContent($conversation);
             }
         } catch (\Exception $e) {
+            \Helper::log('github_ai', 'ERROR: ' . $e->getMessage());
             \Helper::logException($e, '[GitHub] AI Content Generation Error');
+            
+            // Re-throw API errors so frontend can display them properly
+            if (strpos($e->getMessage(), 'Failed to generate content:') === 0) {
+                throw $e;
+            }
+            
             return $this->generateManualContent($conversation);
         }
     }
@@ -37,12 +50,15 @@ class IssueContentGenerator
     /**
      * Generate content using OpenAI API
      */
-    private function generateWithOpenAI(Conversation $conversation, $apiKey)
+        private function generateWithOpenAI(Conversation $conversation, $apiKey, $availableLabels = [])
     {
-        
         $conversationText = $this->extractConversationText($conversation);
+        $prompt = $this->buildPrompt($conversationText, $conversation, $availableLabels);
         
-        $prompt = $this->buildPrompt($conversationText, $conversation);
+        // Sanitize prompt for GPT-5 Mini strict UTF-8 compliance
+        $prompt = $this->sanitizeForGPT5Mini($prompt);
+        
+        \Helper::log('github_ai', 'OpenAI request prepared: ' . strlen($prompt) . ' chars, ' . count($availableLabels) . ' labels');
 
         // Determine SSL settings based on environment
         $isLocalDev = in_array(config('app.env'), ['local', 'dev', 'development']) || 
@@ -59,24 +75,10 @@ class IssueContentGenerator
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_HTTPHEADER => [
                 'Authorization: Bearer ' . $apiKey,
-                'Content-Type: application/json'
+                'Content-Type: application/json; charset=utf-8'
             ],
             CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => \Helper::jsonEncodeSafe([
-                'model' => \Option::get('github.openai_model', 'gpt-3.5-turbo'),
-                'messages' => [
-                    [
-                        'role' => 'system',
-                        'content' => 'You are a helpful assistant that creates GitHub issues from customer support conversations. Always respond with valid JSON containing "title" and "body" fields.'
-                    ],
-                    [
-                        'role' => 'user',
-                        'content' => $prompt
-                    ]
-                ],
-                'max_tokens' => 1000,
-                'temperature' => 0.7
-            ])
+            CURLOPT_POSTFIELDS => $this->prepareOpenAIPayload($prompt)
         ]);
 
         $response = curl_exec($curl);
@@ -86,33 +88,206 @@ class IssueContentGenerator
         $info = curl_getinfo($curl);
         curl_close($curl);
 
+        // Handle API errors
+        if ($httpCode !== 200) {
+            $errorMessage = 'OpenAI API Error: HTTP ' . $httpCode;
+            
+            // Try to parse the error response
+            if ($response) {
+                $errorData = json_decode($response, true);
+                if ($errorData && isset($errorData['error']['message'])) {
+                    $errorMessage .= ' - ' . $errorData['error']['message'];
+                }
+            }
+            
+            \Helper::log('github_ai', 'ERROR: ' . $errorMessage);
+            throw new \Exception('Failed to generate content: ' . $errorMessage);
+        }
 
         if ($httpCode === 200) {
+            // Ensure response is properly UTF-8 encoded
+            $response = mb_convert_encoding($response, 'UTF-8', 'UTF-8');
             $data = json_decode($response, true);
+            
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                $jsonError = json_last_error_msg();
+                \Helper::log('github_ai', 'ERROR: Invalid JSON response - ' . $jsonError);
+                throw new \Exception('Failed to generate content: Invalid JSON response from OpenAI API - ' . $jsonError);
+            }
+            
+            // Log token usage summary
+            if (isset($data['usage'])) {
+                $usage = $data['usage'];
+                $finishReason = isset($data['choices'][0]['finish_reason']) ? $data['choices'][0]['finish_reason'] : 'unknown';
+                \Helper::log('github_ai', 'OpenAI response: ' . ($usage['prompt_tokens'] ?? 0) . ' prompt + ' . ($usage['completion_tokens'] ?? 0) . ' completion = ' . ($usage['total_tokens'] ?? 0) . ' total tokens, finish: ' . $finishReason);
+            }
             
             if (isset($data['choices'][0]['message']['content'])) {
                 $contentString = $data['choices'][0]['message']['content'];
+                $finishReason = isset($data['choices'][0]['finish_reason']) ? $data['choices'][0]['finish_reason'] : 'unknown';
+                
+                // Check for empty content due to token limits
+                if (empty($contentString)) {
+                    if ($finishReason === 'length') {
+                        \Helper::log('github_ai', 'ERROR: Response cut off due to token limit');
+                        throw new \Exception('Failed to generate content: OpenAI response was cut off due to token limit. The prompt may be too long or max_completion_tokens too small.');
+                    } else {
+                        \Helper::log('github_ai', 'ERROR: Empty content, finish_reason: ' . $finishReason);
+                        throw new \Exception('Failed to generate content: OpenAI returned empty content (finish_reason: ' . $finishReason . ')');
+                    }
+                }
+                
+                // Ensure content string is UTF-8
+                $contentString = mb_convert_encoding($contentString, 'UTF-8', 'UTF-8');
                 
                 $content = json_decode($contentString, true);
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    $jsonError = json_last_error_msg();
+                    \Helper::log('github_ai', 'ERROR: Invalid JSON content - ' . $jsonError);
+                    throw new \Exception('Failed to generate content: Invalid JSON content from OpenAI API - ' . $jsonError);
+                }
+                
                 if ($content && isset($content['title'], $content['body'])) {
+                    // Ensure title and body are UTF-8
+                    if (isset($content['title'])) {
+                        $content['title'] = mb_convert_encoding($content['title'], 'UTF-8', 'UTF-8');
+                    }
+                    if (isset($content['body'])) {
+                        $content['body'] = mb_convert_encoding($content['body'], 'UTF-8', 'UTF-8');
+                    }
+                    
+                    $labelCount = isset($content['suggested_labels']) ? count($content['suggested_labels']) : 0;
+                    \Helper::log('github_ai', 'SUCCESS: Generated title (' . strlen($content['title']) . ' chars), body (' . strlen($content['body']) . ' chars), ' . $labelCount . ' labels');
+                    
                     // Post-process to inject conversation JSON
                     return $this->injectConversationContext($content, $conversation);
+                } else {
+                    \Helper::log('github_ai', 'ERROR: Missing required fields (title/body)');
+                    throw new \Exception('Failed to generate content: OpenAI response missing required title or body fields');
                 }
+            } else {
+                \Helper::log('github_ai', 'ERROR: Response missing content field');
+                throw new \Exception('Failed to generate content: OpenAI response missing content field');
             }
         }
 
-        // Fallback if API call fails
-        return $this->generateManualContent($conversation);
+        // This should never be reached due to the error handling above
+        throw new \Exception('Failed to generate content: Unexpected OpenAI API response');
+    }
+
+    /**
+     * Prepare OpenAI API payload with extensive debugging
+     */
+    private function prepareOpenAIPayload($prompt)
+    {
+        $model = \Option::get('github.openai_model', 'gpt-5-mini');
+
+        // GPT-5 models use different parameters than GPT-4/3.5
+        $isGPT5 = (strpos($model, 'gpt-5') !== false);
+        $tokenParam = $isGPT5 ? 'max_completion_tokens' : 'max_tokens';
+        
+        $payload = [
+            'model' => $model,
+            'messages' => [
+                [
+                    'role' => 'system',
+                    'content' => 'You are a helpful assistant that creates GitHub issues from customer support conversations. Always respond with valid JSON containing "title" and "body" fields.'
+                ],
+                [
+                    'role' => 'user',
+                    'content' => $prompt
+                ]
+            ],
+            $tokenParam => $isGPT5 ? 3000 : 1500  // Increased tokens for longer conversations
+        ];
+        
+        // GPT-5 models don't support temperature parameter (defaults to 1.0)
+        if (!$isGPT5) {
+            $payload['temperature'] = 0.7;
+        }
+
+        // Sanitize the entire payload
+        $sanitizedPayload = $this->sanitizeDataForGPT5Mini($payload);
+
+        // Try JSON encoding with fallback
+        $jsonPayload = json_encode($sanitizedPayload, JSON_UNESCAPED_UNICODE);
+        
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            // Try without JSON_UNESCAPED_UNICODE
+            $jsonPayload = json_encode($sanitizedPayload);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                // Try with Helper::jsonEncodeSafe as fallback
+                $jsonPayload = \Helper::jsonEncodeSafe($sanitizedPayload);
+            }
+        }
+
+        return $jsonPayload;
+    }
+
+    /**
+     * Comprehensive UTF-8 sanitizer for GPT-5 Mini compatibility
+     * GPT-5 Mini is much stricter about UTF-8 compliance than GPT-3.5 Turbo
+     */
+    private function sanitizeForGPT5Mini($text)
+    {
+        if (empty($text)) {
+            return $text;
+        }
+        
+        // Step 1: Convert to valid UTF-8, replacing invalid sequences
+        $text = mb_convert_encoding($text, 'UTF-8', 'UTF-8');
+        
+        // Step 2: Remove control characters (except tab, newline, carriage return)
+        $text = preg_replace('/[[:cntrl:]]/', '', $text);
+        // But keep essential whitespace
+        $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $text);
+        
+        // Step 3: Normalize line endings
+        $text = str_replace(["\r\n", "\r"], "\n", $text);
+        
+        // Step 4: Remove BOM (Byte Order Mark) if present
+        $text = str_replace("\xEF\xBB\xBF", '', $text);
+        
+        // Step 5: Remove any remaining null bytes
+        $text = str_replace("\0", '', $text);
+        
+        // Step 6: Ensure the result is still valid UTF-8
+        if (!mb_check_encoding($text, 'UTF-8')) {
+            // Fallback: force conversion and remove problematic characters
+            $text = mb_convert_encoding($text, 'UTF-8', 'auto');
+            $text = filter_var($text, FILTER_UNSAFE_RAW, FILTER_FLAG_STRIP_LOW | FILTER_FLAG_STRIP_HIGH);
+        }
+        
+        return $text;
+    }
+    
+    /**
+     * Recursively sanitize arrays and objects for GPT-5 Mini
+     */
+    private function sanitizeDataForGPT5Mini($data)
+    {
+        if (is_string($data)) {
+            return $this->sanitizeForGPT5Mini($data);
+        } elseif (is_array($data)) {
+            return array_map([$this, 'sanitizeDataForGPT5Mini'], $data);
+        } elseif (is_object($data)) {
+            foreach ($data as $key => $value) {
+                $data->$key = $this->sanitizeDataForGPT5Mini($value);
+            }
+            return $data;
+        }
+        
+        return $data;
     }
 
     /**
      * Generate content using Claude API
      */
-    private function generateWithClaude(Conversation $conversation, $apiKey)
+    private function generateWithClaude(Conversation $conversation, $apiKey, $availableLabels = [])
     {
         $conversationText = $this->extractConversationText($conversation);
         
-        $prompt = $this->buildPrompt($conversationText, $conversation);
+        $prompt = $this->buildPrompt($conversationText, $conversation, $availableLabels);
 
         // Determine SSL settings based on environment  
         $isLocalDev = in_array(config('app.env'), ['local', 'dev', 'development']) || 
@@ -423,46 +598,106 @@ class IssueContentGenerator
             ->limit(20) // Increased limit since we're filtering by date
             ->get();
 
-        // Build structured conversation data
+        // Build structured conversation data with UTF-8 sanitization
         $conversationData = [
-            'subject' => $conversation->subject,
+            'subject' => $this->sanitizeForGPT5Mini($conversation->subject),
             'created_at' => $conversation->created_at->toIso8601String(),
             'messages' => []
         ];
         
-        foreach ($threads as $thread) {
+        foreach ($threads as $index => $thread) {
             // Determine sender type more accurately
             $sender = 'Support';
             $senderName = 'Support Team';
             
             if ($thread->type === \App\Thread::TYPE_CUSTOMER) {
                 $sender = 'Customer';
-                $senderName = $thread->created_by ? $thread->created_by->getFullName() : 'Customer';
+                $rawName = $thread->created_by ? $thread->created_by->getFullName() : 'Customer';
+                $senderName = $this->sanitizeForGPT5Mini($rawName);
             } elseif ($thread->type === \App\Thread::TYPE_NOTE) {
                 $sender = 'Support Team (Internal Note)';
-                $senderName = $thread->created_by ? $thread->created_by->getFullName() : 'Support Team';
+                $rawName = $thread->created_by ? $thread->created_by->getFullName() : 'Support Team';
+                $senderName = $this->sanitizeForGPT5Mini($rawName);
             } elseif ($thread->created_by && $thread->created_by->isCustomer()) {
                 $sender = 'Customer';
-                $senderName = $thread->created_by->getFullName();
+                $rawName = $thread->created_by->getFullName();
+                $senderName = $this->sanitizeForGPT5Mini($rawName);
             } elseif ($thread->created_by) {
-                $senderName = $thread->created_by->getFullName();
+                $rawName = $thread->created_by->getFullName();
+                $senderName = $this->sanitizeForGPT5Mini($rawName);
             }
             
-            $body = $this->extractStructuredContent($thread->body);
-            $body = $this->filterExternalLinks($body);
+            $rawBody = $this->extractStructuredContent($thread->body);
+            $filteredBody = $this->filterExternalLinks($rawBody);
+            $body = $this->sanitizeForGPT5Mini($filteredBody); // Sanitize message content
             
             $conversationData['messages'][] = [
                 'timestamp' => $thread->created_at->toIso8601String(),
-                'sender_type' => $sender,
+                'sender_type' => $this->sanitizeForGPT5Mini($sender),
                 'sender_name' => $senderName,
                 'message' => $body
             ];
         }
 
         // Format as JSON in markdown block for better AI parsing
-        $jsonData = json_encode($conversationData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        $jsonData = json_encode($conversationData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        
+        // Check for JSON encoding errors
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            \Helper::log('github_ai', 'JSON encoding failed: ' . json_last_error_msg());
+            
+            // Fallback: try with basic encoding
+            $jsonData = json_encode($conversationData);
+            if (!$jsonData) {
+                // Ultimate fallback: basic text representation
+                $jsonData = "{\n  \"subject\": \"" . addslashes($conversationData['subject']) . "\",\n  \"messages\": " . count($conversationData['messages']) . " messages\n}";
+            }
+        }
         
         return "```json\n" . $jsonData . "\n```";
+    }
+
+    /**
+     * Remove email signatures and repetitive content to save tokens
+     */
+    private function removeEmailSignatures($html)
+    {
+        // Remove common email signature patterns
+        $patterns = [
+            // Outlook/email signature divs
+            '/<div[^>]*id=["\']?Signature["\']?[^>]*>.*?<\/div>/si',
+            '/<div[^>]*class=["\'][^"\']*signature[^"\']*["\'][^>]*>.*?<\/div>/si',
+            
+            // Social media icon sections (multiple consecutive image links)
+            '/<a[^>]*href=["\'][^"\']*(?:facebook|twitter|instagram|linkedin|youtube|tiktok)[^"\']*["\'][^>]*>.*?<\/a>\s*(?:<a[^>]*href=["\'][^"\']*(?:facebook|twitter|instagram|linkedin|youtube|tiktok)[^"\']*["\'][^>]*>.*?<\/a>\s*){2,}/si',
+            
+            // Large embedded images (logos, signatures)
+            '/<img[^>]*(?:width=["\']?[2-9]\d{2,}|height=["\']?[2-9]\d{2,})[^>]*>/si',
+            '/<img[^>]*src=["\'][^"\']*(?:googleusercontent|lh[0-9]\.google)[^"\']*["\'][^>]*>/si',
+            
+            // Contact information blocks
+            '/<p[^>]*>.*?(?:office|phone|hours|my hours):\s*[^<]*<\/p>/si',
+            
+            // Review request sections
+            '/Happy with our programs.*?<\/div>/si',
+            '/Please leave us a.*?review.*?<\/div>/si',
+            
+            // Multiple consecutive <br> tags
+            '/(?:<br[^>]*>\s*){3,}/si',
+            
+            // Empty divs and paragraphs
+            '/<(?:div|p)[^>]*>\s*(?:<br[^>]*>\s*)*<\/(?:div|p)>/si',
+        ];
+        
+        foreach ($patterns as $pattern) {
+            $html = preg_replace($pattern, '', $html);
+        }
+        
+        // Clean up extra whitespace
+        $html = preg_replace('/\s+/', ' ', $html);
+        $html = trim($html);
+        
+        return $html;
     }
 
     /**
@@ -495,6 +730,9 @@ class IssueContentGenerator
     {
         // Clean UTF-8 encoding before processing
         $html = \Helper::utf8Encode($html);
+        
+        // Remove email signatures and repetitive content to save tokens
+        $html = $this->removeEmailSignatures($html);
         
         // Check if this looks like a structured HTML table form
         if (strpos($html, '<table') !== false && strpos($html, '<strong>') !== false) {
@@ -559,7 +797,6 @@ class IssueContentGenerator
             
         } catch (\Exception $e) {
             // If HTML parsing fails, fall back to strip_tags
-            \Helper::log('github_html_parsing', 'HTML parsing failed: ' . $e->getMessage());
             return \Helper::utf8Encode(strip_tags($html));
         }
     }
@@ -567,27 +804,38 @@ class IssueContentGenerator
     /**
      * Build AI prompt for content generation
      */
-    private function buildPrompt($conversationText, Conversation $conversation)
+    private function buildPrompt($conversationText, Conversation $conversation, $availableLabels = [])
     {
         $customerName = 'Unknown Customer';
         $customerEmail = 'No email';
         
         if ($conversation->customer) {
-            $customerName = $conversation->customer->getFullName() ?: 'Unknown Customer';
-            $customerEmail = $conversation->customer->getMainEmail() ?: 'No email';
+            $customerName = $this->sanitizeForGPT5Mini($conversation->customer->getFullName() ?: 'Unknown Customer');
+            $customerEmail = $this->sanitizeForGPT5Mini($conversation->customer->getMainEmail() ?: 'No email');
         } else {
             // Try to load customer manually if the relationship didn't work
             if (!empty($conversation->customer_id)) {
                 $customer = \App\Customer::find($conversation->customer_id);
                 if ($customer) {
-                    $customerName = $customer->getFullName() ?: 'Unknown Customer';
-                    $customerEmail = $customer->getMainEmail() ?: 'No email';
+                    $customerName = $this->sanitizeForGPT5Mini($customer->getFullName() ?: 'Unknown Customer');
+                    $customerEmail = $this->sanitizeForGPT5Mini($customer->getMainEmail() ?: 'No email');
                 }
             }
         }
         
         $conversationUrl = url("/conversation/" . $conversation->id);
         $status = ucfirst($conversation->getStatusName());
+        
+        // Build available labels text with UTF-8 encoding
+        if (empty($availableLabels)) {
+            $availableLabelsText = 'bug, enhancement, documentation, question';
+        } else {
+            // Ensure all labels are UTF-8 encoded
+            $encodedLabels = array_map(function($label) {
+                return $this->sanitizeForGPT5Mini($label);
+            }, $availableLabels);
+            $availableLabelsText = implode(', ', $encodedLabels);
+        }
         
         // Check for custom AI prompt template
         $customPrompt = \Option::get('github.ai_prompt_template');
@@ -614,53 +862,40 @@ class IssueContentGenerator
         }
         
         // Extract diagnostic information first
-        $diagnosticInfo = $this->extractDiagnosticInfo($conversationText);
+        // $diagnosticInfo = $this->extractDiagnosticInfo($conversationText);
         
-        // Build diagnostic context for the prompt
-        $diagnosticContext = "";
-        if ($diagnosticInfo) {
-            $diagnosticContext = "\n\nDIAGNOSTIC INFORMATION EXTRACTED:\n";
-            $diagnosticContext .= json_encode($diagnosticInfo, JSON_PRETTY_PRINT);
-            $diagnosticContext .= "\n\nUse this diagnostic information to create a comprehensive issue.";
-        }
+        // // Build diagnostic context for the prompt
+        // $diagnosticContext = "";
+        // if ($diagnosticInfo) {
+        //     $diagnosticContext = "\n\nDIAGNOSTIC INFORMATION EXTRACTED:\n";
+        //     $diagnosticContext .= json_encode($diagnosticInfo, JSON_PRETTY_PRINT);
+        //     $diagnosticContext .= "\n\nUse this diagnostic information to create a comprehensive issue.";
+        // }
 
-        // Default prompt template
-        $prompt = "Create a GitHub issue from this customer support conversation.
+        // Optimized prompt template for token efficiency
+        $prompt = "Create a GitHub issue from this support conversation.
 
-Customer: $customerName
-Customer Email: $customerEmail
-FreeScout URL: $conversationUrl
+Customer: $customerName ($customerEmail)
 Status: $status
 
-Conversation:
-$conversationText$diagnosticContext
+$conversationText
 
-Requirements:
-1. Create a clear, professional issue title (max 80 characters)
-2. Create a detailed issue body with these sections:
-   - **Problem Summary**: Brief description of the issue
-   - **Customer Details**: name: $customerName, email: $customerEmail
-   - **Root Cause Analysis**: Include any diagnostic findings, reproduction confirmations, or technical analysis from support team (e.g., \"CSS issue\", \"element inspection revealed\", \"reproduced on test site\")
-   - **Steps to Reproduce**: Any reproduction steps mentioned by customer or support team
-   - **Troubleshooting Performed**: Methods used to isolate the issue (Health Check plugin, plugin conflicts, etc.)
-   - **Plugin Conflicts**: Specific conflicting plugins identified
-   - **Support Team Findings**: Key diagnostic information from internal notes (inspection results, confirmed reproduction, technical analysis)
-   - **Customer Environment**: Setup details and troubleshooting methods used
-   - **Conversation Context**: Include the full conversation JSON from the last 7 days
+Create JSON with:
+1. **title**: Clear issue title (max 80 chars)
+2. **body**: Markdown formatted with sections:
+   - Problem Summary
+   - Customer: $customerName ($customerEmail)
+   - Root Cause Analysis (focus on support team diagnostic findings)
+   - Steps to Reproduce
+   - Plugin Conflicts (if any)
+   - Support Team Findings (from internal notes)
+   - Customer Environment
+3. **suggested_labels**: 2-4 labels from: $availableLabelsText
 
-3. Pay special attention to support team internal notes (type: \"Support Team (Internal Note)\") - these often contain crucial diagnostic information
-4. Use proper GitHub markdown formatting with clear sections
-5. Be professional and technical in tone
-6. Make the issue actionable for developers by including all diagnostic details
-7. The conversation data is provided as structured JSON - parse it carefully
-8. If diagnostic information is provided above, prioritize it over manual conversation parsing
-9. Do NOT include external links (Loom, Google Drive, etc.) - they've been filtered out
+Focus on support team internal notes for diagnostic info. Be technical and actionable.
 
-Respond with valid JSON in this format:
-{
-  \"title\": \"Issue title here\",
-  \"body\": \"Issue body with markdown formatting\"
-}";
+JSON format:
+{\"title\":\"...\",\"body\":\"...\",\"suggested_labels\":[\"...\"]}";
 
         return $prompt;
     }
@@ -680,14 +915,8 @@ Respond with valid JSON in this format:
      */
     private function extractDiagnosticInfo($conversationText)
     {
-        $aiService = \Option::get('github.ai_service');
-        $aiApiKey = \Option::get('github.ai_api_key');
         
-        if (empty($aiService) || empty($aiApiKey)) {
-            return null;
-        }
-        
-        $prompt = "Analyze this support conversation (provided as structured JSON) and extract diagnostic information.
+        $diagnosticInfo = "Analyze this support conversation (provided as structured JSON) and extract diagnostic information.
 
 Conversation Data:
 $conversationText
@@ -722,18 +951,7 @@ Example response:
   \"customer_environment\": {\"troubleshooting_method\": \"Health Check plugin used to isolate conflict\"}
 }";
 
-        try {
-            $response = $this->callAiService($aiService, $aiApiKey, $prompt);
-            $diagnosticData = json_decode($response, true);
-            
-            if (json_last_error() === JSON_ERROR_NONE && is_array($diagnosticData)) {
-                return $diagnosticData;
-            }
-        } catch (\Exception $e) {
-            \Log::error('AI diagnostic extraction failed: ' . $e->getMessage());
-        }
-        
-        return null;
+        return $diagnosticInfo;
     }
 
     /**
