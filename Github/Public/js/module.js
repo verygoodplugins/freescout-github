@@ -505,7 +505,13 @@ function githubLoadAllowedLabels() {
     try {
         var allowedLabelsJson = $('input[name="current_allowed_labels"]').val();
         if (allowedLabelsJson) {
-            currentAllowedLabels = JSON.parse(allowedLabelsJson);
+            var parsed = JSON.parse(allowedLabelsJson);
+            // Handle case where the stored value might be a JSON string or already an array
+            if (Array.isArray(parsed)) {
+                currentAllowedLabels = parsed;
+            } else if (typeof parsed === 'string') {
+                currentAllowedLabels = JSON.parse(parsed);
+            }
         }
     } catch (e) {
         console.log('No current allowed labels found, will select all by default');

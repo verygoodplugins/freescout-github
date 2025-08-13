@@ -148,7 +148,7 @@ Create JSON with:
    - Plugin Conflicts (if any)
    - Support Team Findings (from internal notes)
    - Customer Environment
-3. **suggested_labels**: 2-4 labels from available options
+3. **suggested_labels**: 2-4 labels from: {available_labels}
 
 Focus on support team internal notes for diagnostic info. Be technical and actionable.
 
@@ -170,14 +170,14 @@ Create JSON with:
    - Plugin Conflicts (if any)
    - Support Team Findings (from internal notes)
    - Customer Environment
-3. **suggested_labels**: 2-4 labels from available options
+3. **suggested_labels**: 2-4 labels from: {available_labels}
 
 Focus on support team internal notes for diagnostic info. Be technical and actionable.
 
 JSON format:
 {"title":"...","body":"...","suggested_labels":["..."]}')) }}</textarea>
                 <p class="form-help">
-                    {{ __('Custom prompt template for AI issue generation. Available variables: {customer_name}, {conversation_url}, {status}, {conversation_text}') }}
+                    {{ __('Custom prompt template for AI issue generation. Available variables: {customer_name}, {customer_email}, {conversation_url}, {status}, {conversation_text}, {available_labels}') }}
                 </p>
             </div>
         </div>
@@ -261,6 +261,8 @@ JSON format:
         <div class="form-group">
             <label for="github_allowed_labels" class="col-sm-2 control-label">{{ __('Allowed Auto-assign Labels') }}</label>
             <div class="col-sm-6">
+                <!-- Hidden field to pass current allowed labels to JavaScript -->
+                <input type="hidden" name="current_allowed_labels" value="{{ json_encode(\Option::get('github.allowed_labels', '[]')) }}">
                 <select class="form-control select2" name="settings[github.allowed_labels][]" id="github_allowed_labels" multiple="multiple" data-placeholder="{{ __('Select allowed labels...') }}">
                     <!-- Labels will be populated by JavaScript -->
                 </select>

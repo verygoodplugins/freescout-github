@@ -863,14 +863,16 @@ class IssueContentGenerator
                 '{conversation_url}',
                 '{conversation_json}',
                 '{status}',
-                '{conversation_text}'
+                '{conversation_text}',
+                '{available_labels}'
             ], [
                 $customerName,
                 $customerEmail,
                 $conversationUrl,
                 $conversationText, // Same as conversation_json
                 $status,
-                $conversationText
+                $conversationText,
+                $availableLabelsText
             ], $customPrompt);
             
             return $prompt;
