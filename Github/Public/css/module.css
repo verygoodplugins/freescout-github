@@ -429,3 +429,55 @@
 .github-p-10 {
     padding: 10px;
 }
+
+/* Allowed Labels Select2 Styling */
+#github_allowed_labels + .select2-container {
+    margin-bottom: 10px;
+}
+
+#github_allowed_labels + .select2-container .select2-selection--multiple {
+    min-height: 38px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 2px 5px;
+}
+
+#github_allowed_labels + .select2-container .select2-selection--multiple .select2-selection__choice {
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 3px;
+    padding: 2px 8px;
+    margin: 2px 3px 2px 0;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+#github_allowed_labels + .select2-container .select2-selection--multiple .select2-selection__choice__remove {
+    color: #6c757d;
+    margin-right: 5px;
+    font-weight: bold;
+}
+
+#github_allowed_labels + .select2-container .select2-selection--multiple .select2-selection__choice__remove:hover {
+    color: #dc3545;
+}
+
+/* Label color indicators in Select2 dropdown */
+.select2-results__option .github-label-color {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    margin-right: 8px;
+    vertical-align: middle;
+}
+
+/* Selected label color indicators */
+.select2-selection__choice .github-label-color {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    margin-right: 6px;
+    vertical-align: middle;
+}

@@ -322,19 +322,18 @@ class GithubController extends Controller
         try {
             // Check global settings for auto-generation
             $aiEnabled = !empty(\Option::get('github.ai_service')) && !empty(\Option::get('github.ai_api_key'));
-            $autoAssignLabels = \Option::get('github.auto_assign_labels', false);
+            
+            // Check if auto-assign labels is enabled (if any allowed labels are configured)
+            $allowedLabelsJson = \Option::get('github.allowed_labels', '[]');
+            $allowedLabels = json_decode($allowedLabelsJson, true);
+            $autoAssignLabels = !empty($allowedLabels);
             
             // Auto-generate content if AI is enabled and fields are empty
             if ($aiEnabled && (empty($title) || empty($body))) {
                 try {
-                    // Get available labels for AI suggestions
-                    $availableLabels = [];
-                    $labelsResult = GithubApiClient::getLabels($repository);
-                    if ($labelsResult['status'] === 'success') {
-                        $availableLabels = array_map(function($label) {
-                            return $label['name'];
-                        }, $labelsResult['data'] ?? []);
-                    }
+                    // Use allowed labels from settings instead of fetching from API
+                    $allowedLabelsJson = \Option::get('github.allowed_labels', '[]');
+                    $availableLabels = is_array($allowedLabelsJson) ? $allowedLabelsJson : (json_decode($allowedLabelsJson, true) ?: []);
 
                     $contentGenerator = new IssueContentGenerator();
                     $generatedContent = $contentGenerator->generateContent($conversation, $availableLabels);
@@ -355,10 +354,13 @@ class GithubController extends Controller
             // Auto-assign labels if requested
             if ($autoAssignLabels && empty($labels)) {
                 $labelService = new LabelAssignmentService();
-                $repositoryLabels = GithubApiClient::getLabels($repository);
+                // Use allowed labels as available labels to avoid API call
+                $repositoryLabels = array_map(function($labelName) {
+                    return ['name' => $labelName];
+                }, $allowedLabels);
                 
-                if ($repositoryLabels['status'] === 'success') {
-                    $assignedLabels = $labelService->assignLabels($conversation, $repositoryLabels['data']);
+                if (!empty($repositoryLabels)) {
+                    $assignedLabels = $labelService->assignLabels($conversation, $repositoryLabels);
                     if (is_array($assignedLabels)) {
                         $labels = array_merge($labels, $assignedLabels);
                     }
@@ -634,34 +636,79 @@ class GithubController extends Controller
      */
     public function saveSettings(Request $request)
     {
-        $settings = $request->input('settings', []);
-        $allowed = [
-            'github.token',
-            'github.default_repository',
-            'github.webhook_secret',
-            'github.organizations',
-            'github.ai_service',
-            'github.ai_api_key',
-            'github.openai_model',
-            'github.ai_prompt_template',
-            'github.manual_template',
-            'github.create_remote_link',
-            'github.auto_assign_labels',
-        ];
-        foreach ($allowed as $key) {
-            if (array_key_exists($key, $settings)) {
-                // Checkbox values: if not set, set to 0
-                $value = $settings[$key];
-                if (in_array($key, ['github.create_remote_link', 'github.auto_assign_labels'])) {
-                    $value = $value ? 1 : 0;
-                }
-                \Option::set($key, $value);
-            } else if (in_array($key, ['github.create_remote_link', 'github.auto_assign_labels'])) {
-                // Unchecked checkboxes
-                \Option::set($key, 0);
+        try {
+            // Basic validation to prevent fatal errors
+            if (!$request->has('settings')) {
+                return redirect()->back()->with('error', 'No settings data received.');
             }
+            
+            $settings = $request->input('settings', []);
+            
+            // Validate settings is an array
+            if (!is_array($settings)) {
+                return redirect()->back()->with('error', 'Invalid settings format.');
+            }
+            
+            $allowed = [
+                'github.token',
+                'github.default_repository',
+                'github.webhook_secret',
+                'github.organizations',
+                'github.ai_service',
+                'github.ai_api_key',
+                'github.openai_model',
+                'github.ai_prompt_template',
+                'github.manual_template',
+                'github.create_remote_link',
+                'github.allowed_labels',
+            ];
+            
+            foreach ($allowed as $key) {
+                try {
+                    if (array_key_exists($key, $settings)) {
+                        $value = $settings[$key];
+                        
+                        // Handle special cases
+                        if ($key === 'github.create_remote_link') {
+                            // Checkbox values: if not set, set to 0
+                            $value = $value ? 1 : 0;
+                        } elseif ($key === 'github.allowed_labels') {
+                            // Array of allowed labels - store as JSON
+                            if (is_array($value)) {
+                                // Validate that all values are strings and not empty
+                                $cleanedValue = [];
+                                foreach ($value as $label) {
+                                    if (is_string($label) && !empty(trim($label))) {
+                                        $cleanedValue[] = trim($label);
+                                    }
+                                }
+                                $value = json_encode(array_values($cleanedValue));
+                            } else {
+                                $value = '[]';
+                            }
+                        }
+                        
+                        \Option::set($key, $value);
+                        
+                    } else if ($key === 'github.create_remote_link') {
+                        // Unchecked checkbox
+                        \Option::set($key, 0);
+                    } elseif ($key === 'github.allowed_labels') {
+                        // No labels selected - store empty array
+                        \Option::set($key, '[]');
+                    }
+                } catch (\Exception $e) {
+                    \Helper::log('github_settings', 'Error setting ' . $key . ': ' . $e->getMessage());
+                    // Continue with other settings even if one fails
+                }
+            }
+            
+            return redirect()->back()->with('success', __('Settings saved.'));
+            
+        } catch (\Exception $e) {
+            \Helper::logException($e, '[GitHub] Settings Save Error');
+            return redirect()->back()->with('error', 'Failed to save settings: ' . $e->getMessage());
         }
-        return redirect()->back()->with('success', __('Settings saved.'));
     }
     
     /**
@@ -716,17 +763,9 @@ class GithubController extends Controller
         }
 
         try {
-            // Get available labels for AI suggestions
-            $defaultRepository = \Option::get('github.default_repository');
-            $availableLabels = [];
-            if ($defaultRepository) {
-                $labelsResult = GithubApiClient::getLabels($defaultRepository);
-                if ($labelsResult['status'] === 'success') {
-                    $availableLabels = array_map(function($label) {
-                        return $label['name'];
-                    }, $labelsResult['data'] ?? []);
-                }
-            }
+            // Use allowed labels from settings instead of fetching from API
+            $allowedLabelsJson = \Option::get('github.allowed_labels', '[]');
+            $availableLabels = is_array($allowedLabelsJson) ? $allowedLabelsJson : (json_decode($allowedLabelsJson, true) ?: []);
 
             $contentGenerator = new IssueContentGenerator();
             $generatedContent = $contentGenerator->generateContent($conversation, $availableLabels);

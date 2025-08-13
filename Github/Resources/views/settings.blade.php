@@ -277,16 +277,23 @@ Respond with valid JSON in this format:
 
 
         <div class="form-group">
-            <label for="github_auto_assign_labels" class="col-sm-2 control-label">{{ __('Auto-assign Labels') }}</label>
+            <label for="github_allowed_labels" class="col-sm-2 control-label">{{ __('Allowed Auto-assign Labels') }}</label>
             <div class="col-sm-6">
-                <div class="controls">
-                    <label class="control-label">
-                        <input type="checkbox" name="settings[github.auto_assign_labels]" value="1" {{ old('settings.github.auto_assign_labels', \Option::get('github.auto_assign_labels', true)) ? 'checked' : '' }}> {{ __('Automatically assign labels to new issues') }}
-                    </label>
-                </div>
+                <select class="form-control select2" name="settings[github.allowed_labels][]" id="github_allowed_labels" multiple="multiple" data-placeholder="{{ __('Select allowed labels...') }}">
+                    <!-- Labels will be populated by JavaScript -->
+                </select>
+                @include('partials/field_error', ['field'=>'github.allowed_labels'])
                 <p class="form-help">
-                    {{ __('Use AI and tag mapping to automatically assign appropriate labels') }}
+                    {{ __('Select which labels AI can automatically assign to new issues. All labels are allowed by default. Remove labels you don\'t want AI to assign automatically.') }}
                 </p>
+                <div id="github-labels-loading" class="text-muted" style="display: none;">
+                    <i class="glyphicon glyphicon-refresh glyphicon-spin"></i> {{ __('Loading labels...') }}
+                </div>
+            </div>
+            <div class="col-sm-2">
+                <button type="button" class="btn btn-default" id="refresh-allowed-labels">
+                    <i class="glyphicon glyphicon-refresh"></i> {{ __('Refresh') }}
+                </button>
             </div>
         </div>
 

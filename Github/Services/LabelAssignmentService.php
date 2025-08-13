@@ -37,7 +37,10 @@ class LabelAssignmentService
 
         // Remove duplicates and validate
         $assignedLabels = array_unique($assignedLabels);
-        return $this->validateAndFilterLabels($assignedLabels, $availableLabels);
+        $validatedLabels = $this->validateAndFilterLabels($assignedLabels, $availableLabels);
+        
+        // Filter based on allowed labels setting
+        return $this->filterByAllowedLabels($validatedLabels);
     }
 
     /**
@@ -409,5 +412,42 @@ Respond with valid JSON in this format:
 
         // Limit to maximum 5 labels
         return array_slice(array_unique($validLabels), 0, 5);
+    }
+
+    /**
+     * Filter labels based on allowed labels setting
+     */
+    private function filterByAllowedLabels(array $labels)
+    {
+        // Get allowed labels setting
+        $allowedLabelsJson = \Option::get('github.allowed_labels', '[]');
+        
+        // Handle case where the setting might already be an array or a JSON string
+        if (is_array($allowedLabelsJson)) {
+            $allowedLabels = $allowedLabelsJson;
+        } else {
+            $allowedLabels = json_decode($allowedLabelsJson, true);
+        }
+        
+        // Ensure we have a valid array
+        if (!is_array($allowedLabels)) {
+            $allowedLabels = [];
+        }
+        
+        // If no allowed labels are configured, allow all (backward compatibility)
+        if (empty($allowedLabels)) {
+            return $labels;
+        }
+
+        // Filter labels to only include allowed ones
+        $originalCount = count($labels);
+        $filteredLabels = array_values(array_intersect($labels, $allowedLabels));
+        $filteredCount = count($filteredLabels);
+        
+        if ($originalCount !== $filteredCount) {
+            \Helper::log('github_labels', 'Filtered assigned labels: ' . $originalCount . ' -> ' . $filteredCount . ' (removed ' . ($originalCount - $filteredCount) . ' disallowed labels)');
+        }
+
+        return $filteredLabels;
     }
 }

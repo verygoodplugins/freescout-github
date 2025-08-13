@@ -83,16 +83,41 @@ function githubInitSettings() {
             githubLoadRepositories();
         });
 
+        // Refresh allowed labels button
+        $("#refresh-allowed-labels").click(function(e) {
+            e.preventDefault();
+            githubLoadAllowedLabels();
+        });
+
         // Repository change handler
         $("#github_default_repository").change(function() {
             var repository = $(this).val();
             if (repository) {
                 githubLoadLabelMappings(repository);
                 $('#label-mapping-section').show();
+                // Also load allowed labels when repository changes
+                githubLoadAllowedLabels();
             } else {
                 $('#label-mapping-section').hide();
             }
         });
+
+        // Initialize Select2 on allowed labels field
+        var $allowedLabelsSelect = $('#github_allowed_labels');
+        if ($allowedLabelsSelect.length > 0) {
+            // Initialize with basic Select2 first
+            $allowedLabelsSelect.select2({
+                placeholder: $allowedLabelsSelect.attr('data-placeholder') || 'Select allowed labels...',
+                allowClear: false,
+                width: '100%'
+            });
+        }
+
+        // Load allowed labels on page load if repository is already selected
+        var defaultRepo = $("#github_default_repository").val();
+        if (defaultRepo) {
+            githubLoadAllowedLabels();
+        }
 
         // Add label mapping
         $("#add-label-mapping").click(function(e) {
@@ -460,6 +485,133 @@ function githubPopulateRepositories(repositories) {
     });
 }
 
+function githubLoadAllowedLabels() {
+    var repository = $("#github_default_repository").val();
+    if (!repository) {
+        console.log('No repository selected for loading allowed labels');
+        return;
+    }
+    
+    var $loadingDiv = $('#github-labels-loading');
+    var $refreshBtn = $('#refresh-allowed-labels');
+    var $select = $('#github_allowed_labels');
+    
+    // Show loading indicator
+    $loadingDiv.show();
+    $refreshBtn.find('.glyphicon').addClass('glyphicon-spin');
+    
+    // Get current allowed labels setting
+    var currentAllowedLabels = [];
+    try {
+        var allowedLabelsJson = $('input[name="current_allowed_labels"]').val();
+        if (allowedLabelsJson) {
+            currentAllowedLabels = JSON.parse(allowedLabelsJson);
+        }
+    } catch (e) {
+        console.log('No current allowed labels found, will select all by default');
+    }
+    
+    // Use laroute to generate URL with encoded parameter
+    var url = laroute.route('github.labels', { repository: repository });
+    
+    $.ajax({
+        url: url,
+        type: 'GET',
+        success: function(response) {
+            if (response.status === 'success' && response.data) {
+                githubPopulateAllowedLabels(response.data, currentAllowedLabels);
+            } else {
+                console.error('Failed to load labels:', response.message);
+                showFloatingAlert('error', 'Failed to load labels: ' + (response.message || 'Unknown error'));
+            }
+        },
+        error: function(xhr) {
+            console.error('Failed to load labels:', xhr);
+            showFloatingAlert('error', 'Failed to load labels');
+        },
+        complete: function() {
+            $loadingDiv.hide();
+            $refreshBtn.find('.glyphicon').removeClass('glyphicon-spin');
+        }
+    });
+}
+
+function githubPopulateAllowedLabels(labels, currentAllowedLabels) {
+    var $select = $('#github_allowed_labels');
+    
+    // Destroy existing Select2 if it exists
+    if ($select.hasClass('select2-hidden-accessible')) {
+        $select.select2('destroy');
+    }
+    
+    $select.empty();
+    
+    // If no current allowed labels are set, select all by default
+    var selectAll = currentAllowedLabels.length === 0;
+    
+    $.each(labels, function(i, label) {
+        var isSelected = selectAll || currentAllowedLabels.indexOf(label.name) !== -1;
+        var option = $('<option></option>')
+            .attr('value', label.name)
+            .text(label.name)
+            .prop('selected', isSelected);
+        
+        // Add color styling if available
+        if (label.color) {
+            option.attr('data-color', '#' + label.color);
+        }
+        
+        $select.append(option);
+    });
+    
+    // Initialize Select2 with custom styling for labels
+    $select.select2({
+        placeholder: $select.attr('data-placeholder') || 'Select allowed labels...',
+        allowClear: false,
+        width: '100%',
+        templateResult: function(label) {
+            if (!label.id) return label.text;
+            
+            // Find the option element to get the color
+            var $option = $select.find('option[value="' + label.id + '"]');
+            var color = $option.attr('data-color');
+            
+            if (color) {
+                var $result = $(
+                    '<span style="display: flex; align-items: center;">' +
+                        '<span style="display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 8px; background-color: ' + color + ';"></span>' +
+                        '<span>' + label.text + '</span>' +
+                    '</span>'
+                );
+                return $result;
+            }
+            
+            return label.text;
+        },
+        templateSelection: function(label) {
+            if (!label.id) return label.text;
+            
+            // Find the option element to get the color
+            var $option = $select.find('option[value="' + label.id + '"]');
+            var color = $option.attr('data-color');
+            
+            if (color) {
+                var $selection = $(
+                    '<span style="display: flex; align-items: center;">' +
+                        '<span style="display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; background-color: ' + color + ';"></span>' +
+                        '<span>' + label.text + '</span>' +
+                    '</span>'
+                );
+                return $selection;
+            }
+            
+            return label.text;
+        }
+    });
+    
+    console.log('Populated allowed labels with Select2:', labels.length, 'labels, selected:', $select.val());
+}
+
 function githubLoadRepositoryLabels(repository) {
     // Use laroute to generate URL with encoded parameter
     var url = laroute.route('github.labels', { repository: repository });
@@ -814,9 +966,15 @@ $(document).ready(function() {
         // Initialize sidebar action handlers
         githubInitSidebarActions();
         
-        // Load repositories into cache if not already loaded
+        // Only load repositories if we don't have cached ones and we're actually going to use them
+        // Skip auto-loading on conversation pages since we already have default repository
         if (!GitHub.cache.repositories) {
-            githubLoadRepositories();
+            // Try localStorage cache first
+            var cachedRepos = githubGetCachedRepositories();
+            if (cachedRepos) {
+                GitHub.cache.repositories = cachedRepos;
+            }
+            // Don't auto-load repositories on conversation pages - only load when modals are opened
         }
         
         // Auto-refresh issues when conversation is opened (with intelligent caching)

@@ -92,11 +92,20 @@ class IssueContentGenerator
         if ($httpCode !== 200) {
             $errorMessage = 'OpenAI API Error: HTTP ' . $httpCode;
             
-            // Try to parse the error response
-            if ($response) {
-                $errorData = json_decode($response, true);
-                if ($errorData && isset($errorData['error']['message'])) {
-                    $errorMessage .= ' - ' . $errorData['error']['message'];
+            // Add more specific error handling for HTTP 0
+            if ($httpCode === 0) {
+                if ($error) {
+                    $errorMessage .= ' - Connection failed: ' . $error;
+                } else {
+                    $errorMessage .= ' - Network timeout or connection refused. This is usually temporary - please try again.';
+                }
+            } else {
+                // Try to parse the error response for other HTTP codes
+                if ($response) {
+                    $errorData = json_decode($response, true);
+                    if ($errorData && isset($errorData['error']['message'])) {
+                        $errorMessage .= ' - ' . $errorData['error']['message'];
+                    }
                 }
             }
             
@@ -158,6 +167,9 @@ class IssueContentGenerator
                     
                     $labelCount = isset($content['suggested_labels']) ? count($content['suggested_labels']) : 0;
                     \Helper::log('github_ai', 'SUCCESS: Generated title (' . strlen($content['title']) . ' chars), body (' . strlen($content['body']) . ' chars), ' . $labelCount . ' labels');
+                    
+                    // Filter suggested labels based on allowed labels setting
+                    $content = $this->filterSuggestedLabels($content);
                     
                     // Post-process to inject conversation JSON
                     return $this->injectConversationContext($content, $conversation);
@@ -329,6 +341,9 @@ class IssueContentGenerator
             if (isset($data['content'][0]['text'])) {
                 $content = json_decode($data['content'][0]['text'], true);
                 if ($content && isset($content['title'], $content['body'])) {
+                    // Filter suggested labels based on allowed labels setting
+                    $content = $this->filterSuggestedLabels($content);
+                    
                     // Post-process to inject conversation JSON
                     return $this->injectConversationContext($content, $conversation);
                 }
@@ -976,5 +991,46 @@ Example response:
         }
         
         return $details ? implode("\n", array_unique($details)) : null;
+    }
+
+    /**
+     * Filter suggested labels based on allowed labels setting
+     */
+    private function filterSuggestedLabels($content)
+    {
+        if (!isset($content['suggested_labels']) || !is_array($content['suggested_labels'])) {
+            return $content;
+        }
+
+        // Get allowed labels setting
+        $allowedLabelsJson = \Option::get('github.allowed_labels', '[]');
+        
+        // Handle case where the setting might already be an array or a JSON string
+        if (is_array($allowedLabelsJson)) {
+            $allowedLabels = $allowedLabelsJson;
+        } else {
+            $allowedLabels = json_decode($allowedLabelsJson, true);
+        }
+        
+        // Ensure we have a valid array
+        if (!is_array($allowedLabels)) {
+            $allowedLabels = [];
+        }
+        
+        // If no allowed labels are configured, allow all (backward compatibility)
+        if (empty($allowedLabels)) {
+            return $content;
+        }
+
+        // Filter suggested labels to only include allowed ones
+        $originalCount = count($content['suggested_labels']);
+        $content['suggested_labels'] = array_values(array_intersect($content['suggested_labels'], $allowedLabels));
+        $filteredCount = count($content['suggested_labels']);
+        
+        if ($originalCount !== $filteredCount) {
+            \Helper::log('github_ai', 'Filtered suggested labels: ' . $originalCount . ' -> ' . $filteredCount . ' (removed ' . ($originalCount - $filteredCount) . ' disallowed labels)');
+        }
+
+        return $content;
     }
 }
