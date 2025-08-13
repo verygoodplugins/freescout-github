@@ -162,16 +162,23 @@ function githubInitModals() {
                 $(this).detach().appendTo('body');
             }
             
-            // Use cached repositories if available to avoid unnecessary API calls
-            if (GitHub.cache.repositories && GitHub.cache.repositories.length > 0) {
-                githubPopulateRepositories(GitHub.cache.repositories);
+            // Only populate repositories if we don't have a default repository
+            // Most users will use the default repository, so avoid unnecessary API calls
+            var defaultRepo = GitHub.defaultRepository;
+            if (defaultRepo) {
+                // Just populate with the default repository to avoid API call
+                githubPopulateRepositories([{full_name: defaultRepo, name: defaultRepo.split('/')[1], has_issues: true}]);
             } else {
-                // Try localStorage cache
-                var cachedRepos = githubGetCachedRepositories();
-                if (cachedRepos) {
-                    githubPopulateRepositories(cachedRepos);
+                // Only load all repositories if no default is set
+                if (GitHub.cache.repositories && GitHub.cache.repositories.length > 0) {
+                    githubPopulateRepositories(GitHub.cache.repositories);
                 } else {
-                    githubLoadRepositories();
+                    var cachedRepos = githubGetCachedRepositories();
+                    if (cachedRepos) {
+                        githubPopulateRepositories(cachedRepos);
+                    } else {
+                        githubLoadRepositories();
+                    }
                 }
             }
             $('#github-create-issue-form')[0].reset();
@@ -210,16 +217,23 @@ function githubInitModals() {
                 $(this).detach().appendTo('body');
             }
             
-            // Use cached repositories if available to avoid unnecessary API calls
-            if (GitHub.cache.repositories && GitHub.cache.repositories.length > 0) {
-                githubPopulateRepositories(GitHub.cache.repositories);
+            // Only populate repositories if we don't have a default repository
+            // Most users will use the default repository, so avoid unnecessary API calls
+            var defaultRepo = GitHub.defaultRepository;
+            if (defaultRepo) {
+                // Just populate with the default repository to avoid API call
+                githubPopulateRepositories([{full_name: defaultRepo, name: defaultRepo.split('/')[1], has_issues: true}]);
             } else {
-                // Try localStorage cache
-                var cachedRepos = githubGetCachedRepositories();
-                if (cachedRepos) {
-                    githubPopulateRepositories(cachedRepos);
+                // Only load all repositories if no default is set
+                if (GitHub.cache.repositories && GitHub.cache.repositories.length > 0) {
+                    githubPopulateRepositories(GitHub.cache.repositories);
                 } else {
-                    githubLoadRepositories();
+                    var cachedRepos = githubGetCachedRepositories();
+                    if (cachedRepos) {
+                        githubPopulateRepositories(cachedRepos);
+                    } else {
+                        githubLoadRepositories();
+                    }
                 }
             }
             $('#github-link-issue-form')[0].reset();
@@ -820,7 +834,11 @@ function githubGenerateIssueContent() {
     
     $generateBtn.prop('disabled', true).find('i').removeClass('glyphicon-flash').addClass('glyphicon-refresh glyphicon-spin');
     
+    // Show progress message for user feedback
+    showFloatingAlert('info', 'Generating AI content...');
+    
     $.ajax({
+        timeout: 65000, // 65 second timeout to match backend
         url: laroute.route('github.generate_content'),
         type: 'POST',
         data: {

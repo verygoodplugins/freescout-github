@@ -141,12 +141,14 @@ Respond with valid JSON:
 
 1. **Open a conversation** in FreeScout
 2. **Click "Create GitHub Issue"** in the sidebar GitHub Issues section
-3. **Review AI-generated content**:
+3. **Wait for AI generation** (10-15 seconds):
    - Title and description are automatically generated
-   - Labels are suggested based on conversation and AI analysis
-   - Assignees can be manually selected
-4. **Customize if needed** and click "Create Issue"
-5. **Issue is created** and automatically linked to the conversation
+   - Labels are suggested based on conversation context and AI analysis
+   - Progress indicator shows generation status
+4. **Review and customize** the generated content if needed
+5. **Click "Create Issue"** - issue is created and automatically linked to the conversation
+
+> **Note**: GPT-5 models provide higher quality results with optimized performance (10-15 seconds). GPT-4o-mini is available for even faster responses if needed.
 
 ### Linking Existing Issues
 
@@ -360,8 +362,14 @@ This module is released under the same license as FreeScout. See the FreeScout l
 - **Enhanced**: AI prompt engineering with improved context and formatting for better issue generation
 - **Enhanced**: Label assignment service with intelligent limiting and reduced API calls
 - **Enhanced**: Error handling throughout the application with better user feedback
-- **Improved**: Performance optimizations with reduced GitHub API calls
+- **Enhanced**: Performance optimizations - eliminated duplicate AI calls and unnecessary repository fetches
+- **Enhanced**: Extended timeouts and execution limits for GPT-5 models (up to 60 seconds)
+- **Enhanced**: User feedback with progress indicators during AI generation
+- **Enhanced**: GPT-5 models now use the new Responses API with `reasoning_effort: low` and `verbosity: low` for faster response times (10-15 seconds vs 20+ seconds)
+- **Enhanced**: GPT-5 models support up to 400,000 token context window for handling very large conversations
+- **Improved**: Modal loading performance by avoiding unnecessary API calls
 - **Improved**: UI/UX with better modal styling and label visualization
+- **Fixed**: Repository dropdown error messages and improved caching
 
 ### v1.0.2 (July 31 2025)
 - **Enhanced**: Refresh functionality now fetches fresh data from GitHub API with intelligent caching

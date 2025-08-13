@@ -122,7 +122,7 @@
                 </select>
                 @include('partials/field_error', ['field'=>'github.openai_model'])
                 <p class="form-help">
-                    {{ __('GPT-5 Mini is recommended for most use cases. GPT-5 will be used automatically for complex requests.') }}
+                    {{ __('GPT-5 Mini is recommended for most use cases (10-15 second response time). GPT-5 models use low reasoning effort for faster responses while maintaining quality.') }}
                 </p>
             </div>
         </div>

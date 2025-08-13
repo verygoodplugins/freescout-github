@@ -290,6 +290,9 @@ class GithubController extends Controller
      */
     public function createIssue(Request $request)
     {
+        // Increase execution time for AI generation (GPT-5 can be slow)
+        set_time_limit(90);
+        
         $request->validate([
             'conversation_id' => 'required|integer|exists:conversations,id',
             'repository' => 'required|string',
@@ -340,6 +343,12 @@ class GithubController extends Controller
                     
                     $title = $title ?: $generatedContent['title'];
                     $body = $body ?: $generatedContent['body'];
+                    
+                    // Use AI-suggested labels if auto-assign is enabled and no labels provided
+                    if ($autoAssignLabels && empty($labels) && isset($generatedContent['suggested_labels']) && is_array($generatedContent['suggested_labels'])) {
+                        $labels = $generatedContent['suggested_labels'];
+                        \Helper::log('github_controller', 'Using AI-suggested labels: ' . implode(', ', $labels));
+                    }
                 } catch (\Exception $e) {
                     // Log the error but return it to frontend for display
                     \Helper::log('github_controller_error', 'AI content generation failed: ' . $e->getMessage());
@@ -351,21 +360,8 @@ class GithubController extends Controller
                 }
             }
 
-            // Auto-assign labels if requested
-            if ($autoAssignLabels && empty($labels)) {
-                $labelService = new LabelAssignmentService();
-                // Use allowed labels as available labels to avoid API call
-                $repositoryLabels = array_map(function($labelName) {
-                    return ['name' => $labelName];
-                }, $allowedLabels);
-                
-                if (!empty($repositoryLabels)) {
-                    $assignedLabels = $labelService->assignLabels($conversation, $repositoryLabels);
-                    if (is_array($assignedLabels)) {
-                        $labels = array_merge($labels, $assignedLabels);
-                    }
-                }
-            }
+            // Note: Label assignment is now handled above in the AI content generation
+            // to avoid duplicate AI calls. Labels are already assigned from generatedContent['suggested_labels']
 
             // Create the issue
             $result = GithubApiClient::createIssue($repository, $title, $body, $labels, $assignees);
@@ -716,6 +712,9 @@ class GithubController extends Controller
      */
     public function generateContent(Request $request)
     {
+        // Increase execution time for AI generation (GPT-5 can be slow)
+        set_time_limit(90);
+        
         try {
             $request->validate([
                 'conversation_id' => 'required|integer|exists:conversations,id'

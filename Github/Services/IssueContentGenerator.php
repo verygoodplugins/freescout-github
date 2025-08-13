@@ -66,10 +66,21 @@ class IssueContentGenerator
                       strpos(config('app.url'), 'localhost') !== false;
 
         $curl = curl_init();
+        
+        // Determine if this is a GPT-5 model
+        $model = \Option::get('github.openai_model', 'gpt-5-mini');
+        $isGPT5 = (strpos($model, 'gpt-5') !== false);
+        
+        // Determine timeout based on model - GPT-5 models are slower
+        $timeout = $isGPT5 ? 60 : 30;
+        
+        // Use different API endpoints for GPT-5 vs older models
+        $apiUrl = $isGPT5 ? 'https://api.openai.com/v1/responses' : 'https://api.openai.com/v1/chat/completions';
+        
         curl_setopt_array($curl, [
-            CURLOPT_URL => 'https://api.openai.com/v1/chat/completions',
+            CURLOPT_URL => $apiUrl,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 30,
+            CURLOPT_TIMEOUT => $timeout,
             CURLOPT_SSL_VERIFYPEER => !$isLocalDev,
             CURLOPT_SSL_VERIFYHOST => $isLocalDev ? 0 : 2,
             CURLOPT_FOLLOWLOCATION => true,
@@ -78,7 +89,7 @@ class IssueContentGenerator
                 'Content-Type: application/json; charset=utf-8'
             ],
             CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => $this->prepareOpenAIPayload($prompt)
+            CURLOPT_POSTFIELDS => $this->prepareOpenAIPayload($prompt, $isGPT5)
         ]);
 
         $response = curl_exec($curl);
@@ -131,9 +142,50 @@ class IssueContentGenerator
                 \Helper::log('github_ai', 'OpenAI response: ' . ($usage['prompt_tokens'] ?? 0) . ' prompt + ' . ($usage['completion_tokens'] ?? 0) . ' completion = ' . ($usage['total_tokens'] ?? 0) . ' total tokens, finish: ' . $finishReason);
             }
             
-            if (isset($data['choices'][0]['message']['content'])) {
+            // Handle different response formats for GPT-5 vs older models
+            $contentString = null;
+            $finishReason = 'unknown';
+            
+            if ($isGPT5) {
+                // GPT-5 Responses API format - debug the structure
+                \Helper::log('github_ai', 'GPT-5 response structure: ' . json_encode(array_keys($data)));
+                
+                if (isset($data['output']) && is_array($data['output']) && !empty($data['output'])) {
+                    \Helper::log('github_ai', 'Output array length: ' . count($data['output']));
+                    
+                    // Loop through all output items to find the message content
+                    foreach ($data['output'] as $index => $outputItem) {
+                        \Helper::log('github_ai', 'Output[' . $index . '] keys: ' . json_encode(array_keys($outputItem)));
+                        \Helper::log('github_ai', 'Output[' . $index . '] type: ' . ($outputItem['type'] ?? 'unknown'));
+                        
+                        // Look for message type with content
+                        if (isset($outputItem['type']) && $outputItem['type'] === 'message' && isset($outputItem['content'])) {
+                            \Helper::log('github_ai', 'Found message type at index ' . $index);
+                            
+                            if (is_array($outputItem['content']) && !empty($outputItem['content'])) {
+                                \Helper::log('github_ai', 'Content array length: ' . count($outputItem['content']));
+                                
+                                if (isset($outputItem['content'][0]['text'])) {
+                                    $contentString = $outputItem['content'][0]['text'];
+                                    $finishReason = isset($outputItem['status']) ? $outputItem['status'] : 'completed';
+                                    \Helper::log('github_ai', 'Found content at output[' . $index . '].content[0].text');
+                                    break; // Found content, exit loop
+                                } else {
+                                    \Helper::log('github_ai', 'Content[0] structure: ' . json_encode($outputItem['content'][0]));
+                                }
+                            }
+                        } else {
+                            \Helper::log('github_ai', 'Output[' . $index . '] full structure: ' . json_encode($outputItem));
+                        }
+                    }
+                }
+            } elseif (!$isGPT5 && isset($data['choices'][0]['message']['content'])) {
+                // GPT-4/3.5 Chat Completions API format
                 $contentString = $data['choices'][0]['message']['content'];
                 $finishReason = isset($data['choices'][0]['finish_reason']) ? $data['choices'][0]['finish_reason'] : 'unknown';
+            }
+            
+            if ($contentString !== null) {
                 
                 // Check for empty content due to token limits
                 if (empty($contentString)) {
@@ -190,32 +242,46 @@ class IssueContentGenerator
     /**
      * Prepare OpenAI API payload with extensive debugging
      */
-    private function prepareOpenAIPayload($prompt)
+    private function prepareOpenAIPayload($prompt, $isGPT5 = false)
     {
         $model = \Option::get('github.openai_model', 'gpt-5-mini');
 
-        // GPT-5 models use different parameters than GPT-4/3.5
-        $isGPT5 = (strpos($model, 'gpt-5') !== false);
-        $tokenParam = $isGPT5 ? 'max_completion_tokens' : 'max_tokens';
-        
-        $payload = [
-            'model' => $model,
-            'messages' => [
-                [
-                    'role' => 'system',
-                    'content' => 'You are a helpful assistant that creates GitHub issues from customer support conversations. Always respond with valid JSON containing "title" and "body" fields.'
+        if ($isGPT5) {
+            // GPT-5 uses the new Responses API format
+            $payload = [
+                'model' => $model,
+                'instructions' => 'You are a helpful assistant that creates GitHub issues from customer support conversations. Always respond with valid JSON containing "title", "body", and "suggested_labels" fields.',
+                'input' => [
+                    [
+                        'role' => 'user',
+                        'content' => $prompt
+                    ]
                 ],
-                [
-                    'role' => 'user',
-                    'content' => $prompt
+                'max_output_tokens' => 2000,
+                'reasoning' => [
+                    'effort' => 'low'  // Use low reasoning effort for faster responses
+                ],
+                'text' => [
+                    'verbosity' => 'low'  // Keep responses concise for faster processing
                 ]
-            ],
-            $tokenParam => $isGPT5 ? 3000 : 1500  // Increased tokens for longer conversations
-        ];
-        
-        // GPT-5 models don't support temperature parameter (defaults to 1.0)
-        if (!$isGPT5) {
-            $payload['temperature'] = 0.7;
+            ];
+        } else {
+            // GPT-4/3.5 use the chat completions API format
+            $payload = [
+                'model' => $model,
+                'messages' => [
+                    [
+                        'role' => 'system',
+                        'content' => 'You are a helpful assistant that creates GitHub issues from customer support conversations. Always respond with valid JSON containing "title" and "body" fields.'
+                    ],
+                    [
+                        'role' => 'user',
+                        'content' => $prompt
+                    ]
+                ],
+                'max_tokens' => 1500,
+                'temperature' => 0.7
+            ];
         }
 
         // Sanitize the entire payload
