@@ -242,6 +242,11 @@
     background: #f9f9f9;
 }
 
+/* Fix z-index for Select2 dropdown in modals */
+.github-select2-dropdown {
+    z-index: 9999 !important;
+}
+
 .github-issue-header {
     display: flex;
     justify-content: space-between;

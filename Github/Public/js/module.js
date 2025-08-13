@@ -150,6 +150,23 @@ function githubInitModals() {
                 }
             }
             $('#github-create-issue-form')[0].reset();
+            
+            // Initialize labels multiselect with Select2
+            var labelsSelect = $('#github-issue-labels');
+            if (!labelsSelect.hasClass('select2-hidden-accessible')) {
+                labelsSelect.select2({
+                    placeholder: 'Select labels...',
+                    allowClear: true,
+                    closeOnSelect: false,
+                    width: '100%',
+                    dropdownParent: $('#github-create-issue-modal'),
+                    dropdownCssClass: 'github-select2-dropdown' // Custom class for z-index fix
+                });
+            } else {
+                // Clear selection after form reset
+                labelsSelect.val(null).trigger('change');
+            }
+            
             // Restore default repository after form reset
             setTimeout(function() {
                 githubSetDefaultRepository('#github-repository');
@@ -463,11 +480,33 @@ function githubLoadRepositoryLabels(repository) {
 
 function githubPopulateLabels(labels) {
     var select = $('#github-issue-labels');
+    
+    console.log('Populating labels:', labels); // Debug log
+    
+    // Destroy existing Select2 if it exists
+    if (select.hasClass('select2-hidden-accessible')) {
+        select.select2('destroy');
+    }
+    
     select.empty();
     
     $.each(labels, function(i, label) {
         select.append('<option value="' + label.name + '">' + label.name + '</option>');
     });
+    
+    console.log('Options added, initializing Select2'); // Debug log
+    
+    // Initialize Select2 for multiselect
+    select.select2({
+        placeholder: 'Select labels...',
+        allowClear: true,
+        closeOnSelect: false,
+        width: '100%',
+        dropdownParent: $('#github-create-issue-modal'), // Ensure dropdown renders in modal
+        dropdownCssClass: 'github-select2-dropdown' // Custom class for z-index fix
+    });
+    
+    console.log('Select2 initialized, options count:', select.find('option').length); // Debug log
 }
 
 function githubLoadLabelMappings(repository) {
