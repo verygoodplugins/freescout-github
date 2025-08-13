@@ -143,7 +143,7 @@
                     
                     <div class="form-group">
                         <label for="github-issue-body">{{ __('Description') }}</label>
-                        <textarea class="form-control" name="body" id="github-issue-body" rows="6"></textarea>
+                        <textarea class="form-control" name="body" id="github-issue-body" rows="15"></textarea>
                     </div>
                     
                     <div class="row">
