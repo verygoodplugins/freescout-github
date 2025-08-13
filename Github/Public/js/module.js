@@ -643,19 +643,66 @@ function githubPopulateLabels(labels) {
     select.empty();
     
     $.each(labels, function(i, label) {
-        select.append('<option value="' + label.name + '">' + label.name + '</option>');
+        var option = $('<option></option>')
+            .attr('value', label.name)
+            .text(label.name);
+        
+        // Add color styling if available
+        if (label.color) {
+            option.attr('data-color', '#' + label.color);
+        }
+        
+        select.append(option);
     });
     
     console.log('Options added, initializing Select2'); // Debug log
     
-    // Initialize Select2 for multiselect
+    // Initialize Select2 for multiselect with custom styling for labels
     select.select2({
         placeholder: 'Select labels...',
         allowClear: true,
         closeOnSelect: false,
         width: '100%',
         dropdownParent: $('#github-create-issue-modal'), // Ensure dropdown renders in modal
-        dropdownCssClass: 'github-select2-dropdown' // Custom class for z-index fix
+        dropdownCssClass: 'github-select2-dropdown', // Custom class for z-index fix
+        templateResult: function(label) {
+            if (!label.id) return label.text;
+            
+            // Find the option element to get the color
+            var $option = select.find('option[value="' + label.id + '"]');
+            var color = $option.attr('data-color');
+            
+            if (color) {
+                var $result = $(
+                    '<span style="display: flex; align-items: center;">' +
+                        '<span style="display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 8px; background-color: ' + color + ';"></span>' +
+                        '<span>' + label.text + '</span>' +
+                    '</span>'
+                );
+                return $result;
+            }
+            
+            return label.text;
+        },
+        templateSelection: function(label) {
+            if (!label.id) return label.text;
+            
+            // Find the option element to get the color
+            var $option = select.find('option[value="' + label.id + '"]');
+            var color = $option.attr('data-color');
+            
+            if (color) {
+                var $selection = $(
+                    '<span style="display: flex; align-items: center;">' +
+                        '<span style="display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; background-color: ' + color + ';"></span>' +
+                        '<span>' + label.text + '</span>' +
+                    '</span>'
+                );
+                return $selection;
+            }
+            
+            return label.text;
+        }
     });
     
     console.log('Select2 initialized, options count:', select.find('option').length); // Debug log
