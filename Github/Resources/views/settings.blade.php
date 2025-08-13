@@ -131,69 +131,51 @@
         <div class="form-group">
             <label class="col-sm-2 control-label">{{ __('AI Prompt Template') }}</label>
             <div class="col-sm-10">
-                <textarea class="form-control" name="settings[github.ai_prompt_template]" rows="15" placeholder="Create a GitHub issue from this customer support conversation.
+                <textarea class="form-control" name="settings[github.ai_prompt_template]" rows="12" placeholder="Create a GitHub issue from this support conversation.
 
-Customer: {customer_name}
-Customer Email: {customer_email}
-FreeScout URL: {conversation_url}
+Customer: {customer_name} ({customer_email})
 Status: {status}
 
-Conversation:
 {conversation_text}
 
-Requirements:
-1. Create a clear, professional issue title (max 80 characters)
-2. Create a detailed issue body with these sections:
-   - **Problem Summary**: Brief description of the issue
-   - **Customer Details**: name: {customer_name}, email: {customer_email}
-   - **Root Cause Analysis**: Include any diagnostic findings, reproduction confirmations, or technical analysis from support team (e.g., &quot;CSS issue&quot;, &quot;element inspection revealed&quot;, &quot;reproduced on test site&quot;)
-   - **Steps to Reproduce**: Any reproduction steps mentioned by customer or support team
-   - **Troubleshooting Performed**: Methods used to isolate the issue (Health Check plugin, plugin conflicts, etc.)
-   - **Plugin Conflicts**: Specific conflicting plugins identified
-   - **Support Team Findings**: Key diagnostic information from internal notes (inspection results, confirmed reproduction, technical analysis)
-   - **Customer Environment**: Setup details and troubleshooting methods used
+Create JSON with:
+1. **title**: Clear issue title (max 80 chars)
+2. **body**: Markdown formatted with sections:
+   - Problem Summary
+   - Customer: {customer_name} ({customer_email})
+   - Root Cause Analysis (focus on support team diagnostic findings)
+   - Steps to Reproduce
+   - Plugin Conflicts (if any)
+   - Support Team Findings (from internal notes)
+   - Customer Environment
+3. **suggested_labels**: 2-4 labels from available options
 
-3. Pay special attention to support team internal notes - these often contain crucial diagnostic information
-4. Use proper GitHub markdown formatting with clear sections
-5. Be professional and technical in tone
-6. Make the issue actionable for developers by including all diagnostic details
+Focus on support team internal notes for diagnostic info. Be technical and actionable.
 
-Respond with valid JSON in this format:
-{
-  &quot;title&quot;: &quot;Issue title here&quot;,
-  &quot;body&quot;: &quot;Issue body with markdown formatting&quot;
-}">{{ old('settings.github.ai_prompt_template', \Option::get('github.ai_prompt_template', 'Create a GitHub issue from this customer support conversation.
+JSON format:
+{&quot;title&quot;:&quot;...&quot;,&quot;body&quot;:&quot;...&quot;,&quot;suggested_labels&quot;:[&quot;...&quot;]}">{{ old('settings.github.ai_prompt_template', \Option::get('github.ai_prompt_template', 'Create a GitHub issue from this support conversation.
 
-Customer: {customer_name}
-Customer Email: {customer_email}
-FreeScout URL: {conversation_url}
+Customer: {customer_name} ({customer_email})
 Status: {status}
 
-Conversation:
 {conversation_text}
 
-Requirements:
-1. Create a clear, professional issue title (max 80 characters)
-2. Create a detailed issue body with these sections:
-   - **Problem Summary**: Brief description of the issue
-   - **Customer Details**: name: {customer_name}, email: {customer_email}
-   - **Root Cause Analysis**: Include any diagnostic findings, reproduction confirmations, or technical analysis from support team (e.g., "CSS issue", "element inspection revealed", "reproduced on test site")
-   - **Steps to Reproduce**: Any reproduction steps mentioned by customer or support team
-   - **Troubleshooting Performed**: Methods used to isolate the issue (Health Check plugin, plugin conflicts, etc.)
-   - **Plugin Conflicts**: Specific conflicting plugins identified
-   - **Support Team Findings**: Key diagnostic information from internal notes (inspection results, confirmed reproduction, technical analysis)
-   - **Customer Environment**: Setup details and troubleshooting methods used
+Create JSON with:
+1. **title**: Clear issue title (max 80 chars)
+2. **body**: Markdown formatted with sections:
+   - Problem Summary
+   - Customer: {customer_name} ({customer_email})
+   - Root Cause Analysis (focus on support team diagnostic findings)
+   - Steps to Reproduce
+   - Plugin Conflicts (if any)
+   - Support Team Findings (from internal notes)
+   - Customer Environment
+3. **suggested_labels**: 2-4 labels from available options
 
-3. Pay special attention to support team internal notes - these often contain crucial diagnostic information
-4. Use proper GitHub markdown formatting with clear sections
-5. Be professional and technical in tone
-6. Make the issue actionable for developers by including all diagnostic details
+Focus on support team internal notes for diagnostic info. Be technical and actionable.
 
-Respond with valid JSON in this format:
-{
-  "title": "Issue title here",
-  "body": "Issue body with markdown formatting"
-}')) }}</textarea>
+JSON format:
+{"title":"...","body":"...","suggested_labels":["..."]}')) }}</textarea>
                 <p class="form-help">
                     {{ __('Custom prompt template for AI issue generation. Available variables: {customer_name}, {conversation_url}, {status}, {conversation_text}') }}
                 </p>

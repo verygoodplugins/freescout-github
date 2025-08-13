@@ -8,7 +8,7 @@ A comprehensive GitHub integration module for FreeScout that enables support tea
 |---------|-------------|
 | 🤖 **AI-Powered Issue Creation** | Generate issue titles and descriptions automatically using OpenAI or Claude |
 | 🔗 **Issue Linking** | Link existing GitHub issues to conversations with intelligent search |
-| 🏷️ **Smart Label Assignment** | Automatically assign GitHub labels based on conversation tags or AI analysis |
+| 🏷️ **AI-Powered Label Assignment** | Automatically populate and suggest GitHub labels in the modal based on conversation context, with configurable eligible labels in settings |
 | 📊 **Sidebar Integration** | View and manage GitHub issues directly in the conversation sidebar |
 | 🔄 **Bidirectional Sync** | Real-time status updates via GitHub webhooks |
 | 🎯 **Multi-Repository Support** | Work with personal, organization, and installation repositories |
@@ -143,7 +143,7 @@ Respond with valid JSON:
 2. **Click "Create GitHub Issue"** in the sidebar GitHub Issues section
 3. **Review AI-generated content**:
    - Title and description are automatically generated
-   - Labels are suggested based on conversation tags
+   - Labels are suggested based on conversation and AI analysis
    - Assignees can be manually selected
 4. **Customize if needed** and click "Create Issue"
 5. **Issue is created** and automatically linked to the conversation
@@ -172,9 +172,8 @@ Respond with valid JSON:
 
 The module provides flexible label assignment:
 
-1. **FreeScout Tag Mapping**: Direct mapping between FreeScout conversation tags and GitHub labels
-2. **AI Content Analysis**: Analyze conversation content to suggest appropriate labels
-3. **Manual Override**: Users can always modify labels before creating issues
+1. **AI Content Analysis**: Analyze conversation content to suggest appropriate labels
+2. **Manual Override**: Users can always modify labels before creating issues
 
 ### Status Synchronization
 
@@ -353,6 +352,17 @@ This module is released under the same license as FreeScout. See the FreeScout l
 
 ## 📋 Changelog
 
+### v1.1.0 (August 13 2025)
+- **Added**: GPT-4o-mini and GPT-5-mini model support with model selection in settings
+- **Added**: Automatic label assignment in modal based on LLM suggestions from the conversation
+- **Added**: Multi-select label interface for better label management during issue creation
+- **Added**: Color-coded GitHub labels in modal for improved visual organization
+- **Enhanced**: AI prompt engineering with improved context and formatting for better issue generation
+- **Enhanced**: Label assignment service with intelligent limiting and reduced API calls
+- **Enhanced**: Error handling throughout the application with better user feedback
+- **Improved**: Performance optimizations with reduced GitHub API calls
+- **Improved**: UI/UX with better modal styling and label visualization
+
 ### v1.0.2 (July 31 2025)
 - **Enhanced**: Refresh functionality now fetches fresh data from GitHub API with intelligent caching
 - **Enhanced**: Improved support for HTML tables in tickets (i.e. from a Gravity Forms submission)
@@ -382,6 +392,6 @@ Special thanks to the FreeScout community and the contributors who helped test a
 
 ---
 
-**Version**: 1.0.2  
+**Version**: 1.1.0  
 **Compatibility**: FreeScout 1.8.0+  
-**Last Updated**: July 2025
+**Last Updated**: August 13 2025

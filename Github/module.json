@@ -3,7 +3,7 @@
     "alias": "github",
     "description": "GitHub Integration for FreeScout - Create and manage GitHub issues from support conversations",
     "keywords": ["github", "integration", "issues", "ai"],
-    "version": "1.0.2",
+    "version": "1.1.0",
     "active": 1,
     "order": 1000,
     "providers": [

@@ -875,17 +875,6 @@ class IssueContentGenerator
             
             return $prompt;
         }
-        
-        // Extract diagnostic information first
-        // $diagnosticInfo = $this->extractDiagnosticInfo($conversationText);
-        
-        // // Build diagnostic context for the prompt
-        // $diagnosticContext = "";
-        // if ($diagnosticInfo) {
-        //     $diagnosticContext = "\n\nDIAGNOSTIC INFORMATION EXTRACTED:\n";
-        //     $diagnosticContext .= json_encode($diagnosticInfo, JSON_PRETTY_PRINT);
-        //     $diagnosticContext .= "\n\nUse this diagnostic information to create a comprehensive issue.";
-        // }
 
         // Optimized prompt template for token efficiency
         $prompt = "Create a GitHub issue from this support conversation.

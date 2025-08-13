@@ -325,7 +325,7 @@ class GithubController extends Controller
             
             // Check if auto-assign labels is enabled (if any allowed labels are configured)
             $allowedLabelsJson = \Option::get('github.allowed_labels', '[]');
-            $allowedLabels = json_decode($allowedLabelsJson, true);
+            $allowedLabels = is_array($allowedLabelsJson) ? $allowedLabelsJson : (json_decode($allowedLabelsJson, true) ?: []);
             $autoAssignLabels = !empty($allowedLabels);
             
             // Auto-generate content if AI is enabled and fields are empty
