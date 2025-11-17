@@ -606,6 +606,8 @@ class IssueContentGenerator
             $body .= "- **Messages:** " . $threads->count() . "\n";
         }
 
+        $body = $this->appendTicketLink($body, $conversation);
+
         return [
             'title' => $title,
             'body' => $body
@@ -660,6 +662,8 @@ class IssueContentGenerator
             $body .= $conversationSection;
         }
         
+        $body = $this->appendTicketLink($body, $conversation);
+
         $content['body'] = $body;
         return $content;
     }
@@ -1089,5 +1093,23 @@ Example response:
         }
 
         return $content;
+    }
+
+    /**
+     * Append the FreeScout ticket link to the issue body if it's missing
+     */
+    private function appendTicketLink($body, Conversation $conversation)
+    {
+        $ticketUrl = url("/conversation/" . $conversation->id);
+
+        if (stripos($body, $ticketUrl) !== false) {
+            return $body;
+        }
+
+        $body = rtrim($body);
+
+        $body .= "\n\n---\nTicket: [View in FreeScout](" . $ticketUrl . ")\n";
+
+        return $body;
     }
 }
